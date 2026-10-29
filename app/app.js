@@ -377,6 +377,8 @@
     const art = article();
     if (!art) return;
     const svg = art.querySelector('.annot-layer');
+    svg.setAttribute('width', 0); // measure without the layer itself, so it can shrink when the window does
+    svg.setAttribute('height', 0);
     svg.setAttribute('width', art.scrollWidth);
     svg.setAttribute('height', art.scrollHeight);
     const paths = anns(leftPid).filter((a) => a.kind === 'pen')
@@ -927,22 +929,29 @@
     </section>`;
   }
 
-  function renderNavigator(s) {
+  // Completion of a question group, derived from saved answers only (never from checking or grading).
+  function groupStatus(s, g) {
+    const n = g.ids.filter((id) => hasAnswer(s, id)).length;
+    return { n, status: n === g.ids.length ? 'answered' : n ? 'partial' : 'unanswered' };
+  }
+  // One tile per problem group. Tiles navigate by problem id, not by visible number.
+  // showChecks adds the ✓/✗ from Check Answer; a mode without checking (e.g. an exam) passes false.
+  function renderNavigator(s, showChecks = true) {
     const cells = s.groups.map((g, i) => {
-      const n = g.ids.filter((id) => hasAnswer(s, id)).length;
-      const cls = ['nav-cell'];
-      if (n === g.ids.length) cls.push('answered');
-      else if (n) cls.push('partial');
+      const { n, status } = groupStatus(s, g);
+      const cls = ['nav-cell', status];
       if (i === s.index) cls.push('current');
       if (s.marked[g.pid]) cls.push('marked');
-      if (g.ids.every((id) => s.checked[id] === 'correct')) cls.push('good');
-      else if (g.ids.some((id) => s.checked[id] === 'incorrect')) cls.push('bad');
-      const state = [`${n} of ${g.ids.length} parts answered`, s.marked[g.pid] ? 'marked for review' : '', i === s.index ? 'current' : ''].filter(Boolean).join(', ');
-      return `<button class="${cls.join(' ')}" data-action="goto" data-i="${i}" aria-label="Question ${i + 1}, ${state}">${i + 1}</button>`;
+      if (showChecks && g.ids.every((id) => s.checked[id] === 'correct')) cls.push('good');
+      else if (showChecks && g.ids.some((id) => s.checked[id] === 'incorrect')) cls.push('bad');
+      const state = [status === 'partial' ? `${n} of ${g.ids.length} parts answered` : status, s.marked[g.pid] ? 'marked for review' : '', i === s.index ? 'current question' : ''].filter(Boolean).join(', ');
+      return `<button class="${cls.join(' ')}" id="nav-${g.pid}" data-action="goto" data-pid="${g.pid}" aria-label="Question ${i + 1}, ${state}" ${i === s.index ? 'aria-current="step"' : ''}>${i + 1}</button>`;
     }).join('');
-    return `<div class="navigator" role="dialog" aria-label="Question navigator">
-      <h4>${esc(s.title)}</h4>
-      <div class="legend"><span><span class="sw" style="outline:2px solid #1b1b1b;outline-offset:1px"></span>Current</span><span><span class="sw"></span>Unanswered</span><span><span class="sw part"></span>Partly answered</span><span><span class="sw ans"></span>Answered</span><span><span class="sw mk"></span>For Review</span></div>
+    return `<div class="navigator" id="navigator" role="dialog" aria-labelledby="nav-title">
+      <div class="nav-head"><h4 id="nav-title">Question Navigator</h4>
+        <button class="nav-close" data-action="toggle-nav" aria-label="Close question navigator">✕</button></div>
+      <p class="nav-sub">${esc(s.title)}</p>
+      <div class="legend"><span><span class="sw cur"></span>Current</span><span><span class="sw"></span>Unanswered</span><span><span class="sw part"></span>Partly answered</span><span><span class="sw ans"></span>Answered</span><span><span class="sw mk"></span>For Review</span></div>
       <div class="nav-grid">${cells}</div>
       <div class="go-review"><button class="btn" data-action="finish">Go to Review Page</button></div>
     </div>`;
@@ -963,7 +972,7 @@
         <div class="set-name">${esc(s.title)} · <button class="directions-btn" data-action="directions" aria-expanded="${ui.dirOpen}">Directions ▾</button></div></div>
       <div class="center"><span class="progress">Q ${s.index + 1} / ${s.groups.length}</span></div>
       ${timer}
-      ${ui.dirOpen ? `<div class="directions" role="dialog" aria-label="Directions"><p style="margin-top:0">${esc(BUBBLE_NOTE)}</p><p>All parts of a question are shown together on the right. Your answers fill the matching blanks in the code on the left. Use <b>Check Answer</b> to grade a part, or <b>Show Solution</b> to see the official answer.</p><p>Annotate the problem with the toolbar on the left: highlighter, red pen, eraser, undo/redo.</p><p style="margin-bottom:0">Keyboard: <code>←</code>/<code>→</code> previous/next question, <code>M</code> mark for review.</p></div>` : ''}`;
+      ${ui.dirOpen ? `<div class="directions" role="dialog" aria-label="Directions"><p style="margin-top:0">${esc(BUBBLE_NOTE)}</p><p>All parts of a question are shown together on the right. Your answers fill the matching blanks in the code on the left. Use <b>Check Answer</b> to grade a part, or <b>Show Solution</b> to see the official answer.</p><p>Annotate the problem with the toolbar on the left: highlighter, red pen, eraser, undo/redo.</p><p style="margin-bottom:0">Keyboard: <code>←</code>/<code>→</code> previous/next question, <code>M</code> mark for review, <code>Esc</code> closes the question navigator.</p></div>` : ''}`;
   }
   function bannerHTML(s) {
     return s.timer && s.timer.expired
@@ -972,7 +981,7 @@
   function footerHTML(s) {
     const isLast = s.index === s.groups.length - 1;
     return `<div class="left"><button class="btn btn-ghost" data-action="home">← Exit</button></div>
-      <div class="center"><button class="nav-toggle" data-action="toggle-nav" aria-expanded="${ui.navOpen}">Question ${s.index + 1} of ${s.groups.length} ${ui.navOpen ? '▾' : '▴'}</button></div>
+      <div class="center"><button class="nav-toggle" id="nav-toggle" data-action="toggle-nav" aria-expanded="${ui.navOpen}" aria-haspopup="dialog"${ui.navOpen ? ' aria-controls="navigator"' : ''}>Question ${s.index + 1} of ${s.groups.length} <span aria-hidden="true">${ui.navOpen ? '▾' : '▴'}</span></button></div>
       <div class="right">
         <button class="btn btn-primary" data-action="prev" ${s.index === 0 ? 'disabled' : ''}>Back</button>
         <button class="btn btn-primary" data-action="${isLast ? 'finish' : 'next'}">${isLast ? 'Finish' : 'Next'}</button>
@@ -1114,6 +1123,18 @@
   }
 
   // ───────────────────────────── Events ─────────────────────────────
+  function focusEl(id) {
+    const el = document.getElementById(id);
+    if (el) el.focus({ preventScroll: true });
+  }
+  // Arrow keys move between navigator tiles (row by row for ↑/↓); Home/End jump to the ends.
+  function moveInGrid(cell, key) {
+    const cells = Array.from(cell.parentNode.children);
+    const i = cells.indexOf(cell);
+    const cols = cells.filter((c) => c.offsetTop === cells[0].offsetTop).length || 1;
+    const to = { ArrowLeft: i - 1, ArrowRight: i + 1, ArrowUp: i - cols, ArrowDown: i + cols, Home: 0, End: cells.length - 1 }[key];
+    if (cells[to]) cells[to].focus();
+  }
   function toggleIn(list, v) {
     const i = list.indexOf(v);
     if (i >= 0) list.splice(i, 1); else list.push(v);
@@ -1145,8 +1166,17 @@
       case 'home': ui.screen = 'home'; ui.navOpen = false; ui.dirOpen = false; break;
       case 'prev': go(s.index - 1); return;
       case 'next': go(s.index + 1); return;
-      case 'goto': go(Number(btn.dataset.i)); return;
-      case 'toggle-nav': ui.navOpen = !ui.navOpen; ui.dirOpen = false; break;
+      case 'goto': {
+        const i = s.groups.findIndex((g) => g.pid === btn.dataset.pid);
+        if (i >= 0) go(i);
+        focusEl('nav-toggle');
+        return;
+      }
+      case 'toggle-nav':
+        ui.navOpen = !ui.navOpen; ui.dirOpen = false;
+        render();
+        focusEl(ui.navOpen ? `nav-${curGroup().pid}` : 'nav-toggle');
+        return;
       case 'directions': ui.dirOpen = !ui.dirOpen; ui.navOpen = false; break;
       case 'mark': { const pid = curGroup().pid; if (s.marked[pid]) delete s.marked[pid]; else s.marked[pid] = true; break; }
       case 'check': {
@@ -1283,13 +1313,21 @@
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       if (ui.navOpen || ui.dirOpen || ui.confirmReveal || ui.menu) {
-        ui.navOpen = ui.dirOpen = false; ui.confirmReveal = null; ui.menu = null; render(); return;
+        const wasNav = ui.navOpen;
+        ui.navOpen = ui.dirOpen = false; ui.confirmReveal = null; ui.menu = null; render();
+        if (wasNav) focusEl('nav-toggle');
+        return;
       }
       if (ui.annMode !== 'none') { setAnnMode(ui.annMode); return; }
     }
     if (ui.screen !== 'practice' || e.metaKey || e.ctrlKey || e.altKey) return;
+    // Never steal keys from editing: answer boxes, CodeMirror's hidden textarea, choices, contenteditable.
     const tag = e.target.tagName;
-    if (tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT') return;
+    if (tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT' || e.target.isContentEditable || e.target.closest('.CodeMirror')) return;
+    const cell = e.target.closest('.nav-cell');
+    if (cell && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)) {
+      moveInGrid(cell, e.key); e.preventDefault(); return;
+    }
     const s = store.session;
     if (e.key === 'ArrowRight') { if (s.index < s.groups.length - 1) go(s.index + 1); e.preventDefault(); }
     else if (e.key === 'ArrowLeft') { if (s.index > 0) go(s.index - 1); e.preventDefault(); }
