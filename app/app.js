@@ -25,7 +25,12 @@
   const live = document.getElementById('sr-live');
 
   // ───────────────────────────── State & persistence ─────────────────────────────
-  const DEFAULT_PREFS = { topics: [], exams: Object.keys(EXAMS), difficulties: DIFFS.slice(), types: TYPES.map((t) => t.id), size: 10, timerOn: true, minutes: 25 };
+  const DEFAULT_PREFS = { mode: 'practice', topics: [], exams: Object.keys(EXAMS), difficulties: DIFFS.slice(), types: TYPES.map((t) => t.id), size: 10, timerOn: true, minutes: 25 };
+  // Neither exam PDF states a time limit, so exams start from this editable default (labeled as such in the UI).
+  const EXAM_DEFAULT_MINUTES = 120;
+  const EXAM_MAX_MINUTES = 300;
+  const DEFAULT_EXAM_PREFS = { kind: 'full', examId: Object.keys(EXAMS)[0], topics: [], picked: [], timerOn: true, minutes: EXAM_DEFAULT_MINUTES };
+  const STORE_VERSION = 2; // v1 had prefs/session/notes/annotations only; v2 adds exam, attempts, examPrefs
 
   function load() {
     try { return JSON.parse(localStorage.getItem(STORE_KEY)); } catch (e) { return null; }
@@ -72,14 +77,42 @@
     return notes;
   }
 
+  // Exam attempts have the same shape as a practice session plus mode: 'exam'. They carry their own
+  // scratch notes and annotations, so practice work never shows up inside an exam (or the reverse).
+  function migrateAttempt(a) {
+    if (!a || a.mode !== 'exam' || !migrateSession(a)) return null;
+    a.notes = migrateNotes(a.notes || {});
+    a.annotations = a.annotations || {};
+    a.eliminated = a.eliminated || {};
+    return a;
+  }
+
   const saved = load();
   const store = {
+    version: STORE_VERSION, // same storage key as v1, so practice sessions saved before exams existed still load
     prefs: Object.assign({}, DEFAULT_PREFS, saved && saved.prefs),
     session: migrateSession(saved && saved.session),
     notes: migrateNotes((saved && saved.notes) || {}), // problemId -> scratch editor text (kept across sessions)
     annotations: (saved && saved.annotations) || {},  // problemId -> [annotation] (kept across sessions)
+    examPrefs: Object.assign({}, DEFAULT_EXAM_PREFS, saved && saved.examPrefs),
+    exam: migrateAttempt(saved && saved.exam),         // the exam in progress (never submitted), or null
+    attempts: ((saved && saved.attempts) || []).map(migrateAttempt).filter(Boolean), // submitted exams, oldest first
   };
-  const ui = { screen: 'landing', menu: null, navOpen: false, dirOpen: false, hideClock: false, confirmReveal: null, annMode: 'none' };
+  if (!EXAMS[store.examPrefs.examId]) store.examPrefs.examId = DEFAULT_EXAM_PREFS.examId;
+  store.examPrefs.picked = [...new Set(store.examPrefs.picked)].filter((pid) => PROBLEMS[pid]);
+  // view: which session the question screen shows. 'practice' | 'exam' (in progress) | 'review' (a submitted attempt)
+  const ui = { screen: 'landing', view: 'practice', attemptId: null, menu: null, navOpen: false, dirOpen: false, hideClock: false, confirmReveal: null, annMode: 'none', examQuery: '' };
+
+  const attemptById = (id) => store.attempts.find((a) => a.id === id) || null;
+  function cur() {
+    if (ui.view === 'exam') return store.exam;
+    if (ui.view === 'review') return attemptById(ui.attemptId);
+    return store.session;
+  }
+  const isExam = (s) => !!s && s.mode === 'exam';
+  const locked = (s) => isExam(s) && !!s.submitted; // submitted attempts are read-only
+  const notesOf = () => (isExam(cur()) ? cur().notes : store.notes);
+  const annotationsOf = () => (isExam(cur()) ? cur().annotations : store.annotations);
 
   function announce(msg) {
     live.textContent = '';
@@ -146,6 +179,35 @@
     if (s.selfGrade[id]) return s.selfGrade[id];
     return 'ungraded';
   }
+  // Exam grading (no self-grading): correct | incorrect | skipped | staff.
+  // Choices and short answers with accepted answers are graded here; everything else (code writing)
+  // is 'staff': shown as "Graded by Course Staff", never scored, never counted as zero.
+  function examStatus(s, id) {
+    const q = QMAP[id];
+    if (!hasAnswer(s, id)) return 'skipped';
+    if (isMC(q)) return gradeMC(q, s.answers[id]) ? 'correct' : 'incorrect';
+    const key = ANSWER_KEY[id];
+    if (q.type === 'short_answer' && key && key.accepted && key.accepted.length) return matchesOfficial(q, s.answers[id]) ? 'correct' : 'incorrect';
+    return 'staff';
+  }
+  const hasPoints = (q) => typeof q.points === 'number';
+  // Score over the parts that can be graded here and have a published point value. It is only a
+  // final score when nothing worth points was left out (staff-graded or unknown point value).
+  function examScore(s) {
+    const r = { earned: 0, possible: 0, counts: { correct: 0, incorrect: 0, staff: 0, skipped: 0 }, staff: 0, unknown: 0 };
+    s.ids.forEach((id) => {
+      const q = QMAP[id];
+      const st = examStatus(s, id);
+      r.counts[st]++;
+      if (st === 'staff') { if (q.points !== 0) r.staff++; return; }
+      if (!hasPoints(q)) { r.unknown++; return; }
+      r.possible += q.points;
+      if (st === 'correct') r.earned += q.points;
+    });
+    r.partial = r.staff > 0 || r.unknown > 0;
+    return r;
+  }
+  const fmtPts = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
 
   // ───────────────────────────── Scratch code editor (left pane) ─────────────────────────────
   // The editor document starts as the problem's code template, where each blank is the token ⟦a⟧.
@@ -161,17 +223,18 @@
     return m ? `${m[1]}.py` : `problem_${PROBLEMS[pid].number.replace(/\W+/g, '')}.py`;
   }
   function editedNotes(pid) {
-    return store.notes[pid] !== undefined && store.notes[pid] !== PROBLEMS[pid].code;
+    const notes = notesOf();
+    return notes[pid] !== undefined && notes[pid] !== PROBLEMS[pid].code;
   }
   function partForBlank(pid, name) {
-    const s = store.session;
+    const s = cur();
     const ids = s ? s.ids : [];
     return QUESTIONS.find((q) => q.problem === pid && q.blank === name && ids.includes(q.id)) || null;
   }
   // What a blank should display: { text, kind: 'mc' | 'typed' } or null when unanswered.
   function blankFill(pid, name) {
     const q = partForBlank(pid, name);
-    const s = store.session;
+    const s = cur();
     if (!q || !s) return null;
     const a = s.answers[q.id];
     if (q.type === 'single_choice') return Number.isInteger(a) ? { text: q.choices[a], kind: 'mc' } : null;
@@ -219,21 +282,24 @@
   function createEditor(pid) {
     const wrap = document.createElement('div');
     wrap.className = 'editor-body';
-    const value = store.notes[pid] !== undefined ? store.notes[pid] : PROBLEMS[pid].code;
+    const notes = notesOf(); // captured: this editor only ever writes to the session it was built for
+    const readOnly = locked(cur());
+    const value = notes[pid] !== undefined ? notes[pid] : PROBLEMS[pid].code;
     if (!window.CodeMirror) { // fallback if the vendored editor failed to load
       const ta = document.createElement('textarea');
       ta.className = 'editor-fallback';
       ta.value = value;
       ta.spellcheck = false;
+      ta.readOnly = readOnly;
       ta.setAttribute('aria-label', 'Scratch code editor');
-      ta.addEventListener('input', () => { store.notes[pid] = ta.value; saveSoon(); });
+      ta.addEventListener('input', () => { notes[pid] = ta.value; saveSoon(); });
       wrap.appendChild(ta);
       return { pid, wrap, cm: null, blanks: [], hl: {}, current: null };
     }
     const cm = window.CodeMirror(wrap, {
       value, mode: 'python', theme: 'monokai', lineNumbers: true, indentUnit: 4, tabSize: 4,
       indentWithTabs: false, matchBrackets: true, autoCloseBrackets: true, viewportMargin: Infinity,
-      screenReaderLabel: 'Scratch code editor',
+      screenReaderLabel: 'Scratch code editor', readOnly,
       extraKeys: {
         Tab: (c) => (c.somethingSelected() ? c.indentSelection('add') : c.replaceSelection('    ')),
         'Shift-Tab': (c) => c.indentSelection('subtract'),
@@ -245,7 +311,7 @@
     buildBlanks(ed);
     anns(pid).filter((a) => a.kind === 'code').forEach((a) => markCode(ed, a));
     cm.on('change', (c, ch) => {
-      store.notes[pid] = cm.getValue();
+      notes[pid] = cm.getValue();
       if ([...ch.text, ...ch.removed].join('\n').includes('⟦')) buildBlanks(ed); // a token was pasted
       syncCodeHighlights(ed);
       saveSoon();
@@ -272,8 +338,8 @@
     });
   }
   function resetEditor(pid) {
-    delete store.notes[pid];
-    store.annotations[pid] = anns(pid).filter((a) => a.kind !== 'code'); // code highlights can't survive a reset
+    delete notesOf()[pid];
+    annotationsOf()[pid] = anns(pid).filter((a) => a.kind !== 'code'); // code highlights can't survive a reset
     const ed = editors[pid];
     if (ed && ed.cm) {
       Object.values(ed.hl).forEach((m) => m.clear());
@@ -285,7 +351,7 @@
   }
 
   // ───────────────────────────── Annotations (left pane) ─────────────────────────────
-  // Stored per problem in store.annotations[pid]:
+  // Stored per problem in annotationsOf()[pid] (practice: store.annotations; exams: the attempt's own):
   //   { id, kind: 'hl',   where: 'intro' | 'outro', start, end }    text-offset highlight in the prose
   //   { id, kind: 'code', from: {line, ch}, to: {line, ch} }         highlight inside the code editor
   //   { id, kind: 'pen',  block, pts: [[x, y], …] }                  freehand stroke, relative to a block
@@ -296,7 +362,7 @@
   let leftObserver = null;
   let drawing = null; // in-progress pen stroke or eraser drag
 
-  const anns = (pid) => store.annotations[pid] || (store.annotations[pid] = []);
+  const anns = (pid) => { const all = annotationsOf(); return all[pid] || (all[pid] = []); };
   const hist = (pid) => history[pid] || (history[pid] = { undo: [], redo: [] });
   const newId = () => `a${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   const article = () => document.getElementById('problem-article');
@@ -594,27 +660,41 @@
     if (t && t.runningSince) { t.remainingMs = timeLeft(t); t.runningSince = null; }
   }
   function tick() {
+    // An exam whose time ran out is submitted, whichever screen is showing (also catches up after sleep/background).
+    const ex = store.exam;
+    if (ex && ex.timer && ex.timer.runningSince && timeLeft(ex.timer) <= 0) { submitExam(true); return; }
     const s = store.session;
-    if (!s || !s.timer) return;
-    const t = s.timer;
-    const left = timeLeft(t);
-    if (t.runningSince && left <= 0) {
-      t.remainingMs = 0;
-      t.runningSince = null;
-      t.expired = true;
-      save();
-      announce('Time is up. Your answers have been kept. You can keep reviewing or finish the set.');
-      if (ui.screen === 'practice') render();
-      return;
+    if (s && s.timer) {
+      const t = s.timer;
+      if (t.runningSince && timeLeft(t) <= 0) {
+        t.remainingMs = 0;
+        t.runningSince = null;
+        t.expired = true;
+        save();
+        if (ui.screen === 'practice' && ui.view === 'practice') {
+          announce('Time is up. Your answers have been kept. You can keep reviewing or finish the set.');
+          render();
+        }
+        return;
+      }
     }
+    const shown = ui.screen === 'practice' && cur();
     const el = document.getElementById('clock');
-    if (el) {
+    if (el && shown && shown.timer) {
+      const left = timeLeft(shown.timer);
       el.textContent = fmt(left);
       el.classList.toggle('low', left <= 60000);
     }
   }
   setInterval(tick, 250);
   document.addEventListener('visibilitychange', tick);
+
+  // Active time on an exam (excludes time away after Save & Leave). A refresh or crash doesn't stop it,
+  // matching the countdown, which also keeps running unless the student explicitly saves and leaves.
+  const activeMs = (s) => (s.activeMs || 0) + (s.activeSince ? Date.now() - s.activeSince : 0);
+  function stopActive(s, at) {
+    if (s.activeSince) { s.activeMs = (s.activeMs || 0) + Math.max(0, (at || Date.now()) - s.activeSince); s.activeSince = null; }
+  }
 
   // ───────────────────────────── Bank filtering & sessions ─────────────────────────────
   function filtered(prefs, ignoreTopics) {
@@ -633,6 +713,7 @@
     const p = store.prefs;
     const timer = p.timerOn ? { durationMs: p.minutes * 60000, remainingMs: p.minutes * 60000, runningSince: Date.now(), expired: false } : null;
     store.session = { ids, groups: groupIds(ids), index: 0, title, answers: {}, checked: {}, revealed: {}, selfGrade: {}, marked: {}, eliminated: {}, timer, startedAt: Date.now(), finishedAt: null, finished: false };
+    setView('practice');
     ui.screen = 'practice';
     ui.navOpen = false;
     ui.confirmReveal = null;
@@ -660,13 +741,123 @@
     render();
     window.scrollTo(0, 0);
   }
-  const curGroup = () => store.session.groups[store.session.index];
+  const curGroup = () => cur().groups[cur().index];
+
+  // Switch which session the question screen shows. Editors and annotation history are cached per
+  // problem, so they are dropped whenever the session changes (each session has its own notes).
+  function setView(view, attemptId) {
+    if (ui.view === view && ui.attemptId === (attemptId || null)) return;
+    ui.view = view;
+    ui.attemptId = attemptId || null;
+    detachEditors();
+    Object.keys(editors).forEach((k) => delete editors[k]);
+    Object.keys(history).forEach((k) => delete history[k]);
+    leftPid = null;
+    ui.annMode = 'none';
+    ui.navOpen = false;
+    ui.confirmReveal = null;
+    ui.activeBlank = null;
+  }
+
+  // ───────────────────────────── Exams ─────────────────────────────
+  // A question group is one PROBLEMS entry; an exam always takes every part of each group it includes.
+  const partsOf = (pid) => QUESTIONS.filter((q) => q.problem === pid).sort((a, b) => ORDER[a.id] - ORDER[b.id]);
+  const examGroups = (examId) => Object.keys(PROBLEMS).filter((pid) => PROBLEMS[pid].exam === examId && partsOf(pid).length);
+  const shortExam = (examId) => EXAMS[examId].label.replace('Midterm ', 'MT');
+  const groupTopics = (pid) => [...new Set(partsOf(pid).flatMap((q) => q.topics))];
+  // Sum of the parts' points when all are published; otherwise the problem's printed total.
+  function groupPoints(pid) {
+    const parts = partsOf(pid);
+    return parts.every(hasPoints) ? parts.reduce((t, q) => t + q.points, 0) : PROBLEMS[pid].points;
+  }
+  const kindLabel = (a) => (a.kind === 'full' ? 'Full past exam' : 'Topic-based exam');
+
+  function createExam(kind, examId, pids, minutes) {
+    const ids = pids.flatMap((pid) => partsOf(pid).map((q) => q.id)); // group order as given; parts in exam order
+    const now = Date.now();
+    store.exam = {
+      id: `x${now.toString(36)}${Math.random().toString(36).slice(2, 6)}`, mode: 'exam', kind, examId: examId || null,
+      title: kind === 'full' ? EXAMS[examId].label : `Custom exam · ${pids.length} question${pids.length === 1 ? '' : 's'}`,
+      ids, groups: groupIds(ids), index: 0, answers: {}, checked: {}, revealed: {}, selfGrade: {}, marked: {}, eliminated: {},
+      notes: {}, annotations: {},
+      timer: minutes ? { durationMs: minutes * 60000, remainingMs: minutes * 60000, runningSince: now, expired: false } : null,
+      startedAt: now, finishedAt: null, finished: false, submitted: false, autoSubmitted: false,
+      activeMs: 0, activeSince: now, leftAt: null,
+    };
+    setView('exam');
+    ui.screen = 'practice';
+    save();
+    render();
+    announce(`Exam started: ${store.exam.title}. ${store.exam.groups.length} question${store.exam.groups.length === 1 ? '' : 's'}.`);
+  }
+  function startExamFromPrefs() {
+    const p = store.examPrefs;
+    const pids = p.kind === 'full' ? examGroups(p.examId) : p.picked.slice();
+    if (!pids.length) return;
+    createExam(p.kind, p.kind === 'full' ? p.examId : null, pids, p.timerOn ? p.minutes : null);
+  }
+  function saveAndLeave() {
+    const s = store.exam;
+    pauseTimer(s.timer);
+    stopActive(s);
+    s.leftAt = Date.now();
+    setView('practice');
+    ui.screen = 'home';
+    store.prefs.mode = 'exam';
+    save();
+    render();
+    window.scrollTo(0, 0);
+    announce('Exam saved. Resume it from this page when you are ready.');
+  }
+  function resumeExam() {
+    const s = store.exam;
+    s.leftAt = null;
+    if (s.timer && s.timer.remainingMs > 0 && !s.timer.runningSince) s.timer.runningSince = Date.now();
+    if (!s.activeSince) s.activeSince = Date.now();
+    setView('exam');
+    ui.screen = 'practice';
+    save();
+    render();
+  }
+  // Submit the exam in progress. auto = the timer ran out (possibly while the page was closed),
+  // in which case the attempt is stamped at the moment time expired.
+  function submitExam(auto) {
+    const s = store.exam;
+    if (!s || s.submitted) return;
+    let end = Date.now();
+    if (s.timer) {
+      if (auto && s.timer.runningSince) end = Math.min(end, s.timer.runningSince + s.timer.remainingMs);
+      pauseTimer(s.timer);
+      if (auto) s.timer.remainingMs = 0;
+    }
+    stopActive(s, end);
+    Object.assign(s, { submitted: true, finished: true, finishedAt: end, autoSubmitted: !!auto, leftAt: null });
+    const sc = examScore(s);
+    s.score = { earned: sc.earned, possible: sc.possible, partial: sc.partial }; // snapshot for history
+    store.attempts.push(s);
+    store.exam = null;
+    setView('review', s.id);
+    ui.screen = 'exam-results';
+    save();
+    render();
+    window.scrollTo(0, 0);
+    announce(auto ? 'Time is up. Your exam was submitted automatically.' : 'Exam submitted.');
+  }
+  function confirmSubmit() {
+    const s = store.exam;
+    const st = s.groups.map((g) => groupStatus(s, g).status);
+    const none = st.filter((x) => x === 'unanswered').length;
+    const some = st.filter((x) => x === 'partial').length;
+    const warn = [none ? `${none} unanswered question group${none === 1 ? '' : 's'}` : '', some ? `${some} partly answered question group${some === 1 ? '' : 's'}` : ''].filter(Boolean).join(' and ');
+    return confirm(`Are you sure you want to submit your exam? You will not be able to change your answers afterward.${warn ? `\n\nYou have ${warn}.` : ''}`);
+  }
 
   // ───────────────────────────── Screens ─────────────────────────────
   function renderLanding() {
     const s = store.session;
-    const resume = s && !s.finished
-      ? `<button class="landing-resume" data-action="resume">Resume your unfinished set (Q ${s.index + 1} of ${s.groups.length}) →</button>` : '';
+    const ex = store.exam;
+    const resume = (ex ? `<button class="landing-resume" data-action="resume-exam">Resume your exam: ${esc(ex.title)} (Q ${ex.index + 1} of ${ex.groups.length}) →</button>` : '') +
+      (s && !s.finished ? `<button class="landing-resume" data-action="resume">Resume your unfinished set (Q ${s.index + 1} of ${s.groups.length}) →</button>` : '');
     return `<main class="landing">
       <button class="landing-hit" data-action="enter" aria-label="CS61A Practice: Practice, Learn, Master. Start Practicing">
         <img src="assets/home_page.jpg" alt="" draggable="false">
@@ -733,11 +924,19 @@
 
     const typeName = (id) => TYPES.find((t) => t.id === id).name;
     const cap = (d) => d[0].toUpperCase() + d.slice(1);
+    const mode = p.mode === 'exam' ? 'exam' : 'practice';
+    const modeBtn = (m, title, sub) => `<button class="mode-opt" id="mode-${m}" data-action="mode" data-v="${m}" aria-pressed="${mode === m}"><b>${title}</b><span>${sub}</span></button>`;
     return `<main class="home">
       <div class="home-head"><div><button class="home-brand" data-action="landing" title="Back to the welcome page"><h1>CS 61A Practice</h1></button><p class="tagline">Past-exam questions, one at a time. Pick topics, set a timer, check your work.</p></div></div>
+      ${examResumeHTML()}
       ${resume}
 
-      <section class="setup-card" aria-label="Practice setup">
+      <div class="mode-switch" role="group" aria-label="Mode">
+        ${modeBtn('practice', 'Practice Mode', 'Check answers and see solutions as you go')}
+        ${modeBtn('exam', 'Exam Mode', 'Timed, no feedback until you submit')}
+      </div>
+
+      ${mode === 'exam' ? renderExamSetup() + renderHistory() : `<section class="setup-card" aria-label="Practice setup">
         <div class="dd-row">
           ${dropdown('topics', 'Topics', p.topics.length ? summarize(p.topics, TOPICS.map((t) => t.id), topicName, 'All topics') : 'All topics', topicsBody, true)}
           ${dropdown('exams', 'Exams', summarize(p.exams, Object.keys(EXAMS), (id) => EXAMS[id].label, 'Both midterms'), examsBody)}
@@ -750,15 +949,146 @@
           <div class="summary"><b>${pids.length}</b> matching question${pids.length === 1 ? '' : 's'} · this set has <b>${n}</b>${p.topics.length > 2 ? ` · ${esc(topicNames(p.topics))}` : ''}</div>
           <button class="btn btn-primary btn-lg" data-action="start" ${n && minutesOk ? '' : 'disabled'}>Start practice →</button>
         </div>
-      </section>
+      </section>`}
 
       <div class="notice">No account needed. Your answers, code notes and annotations are saved in <b>this browser on this device</b> and are gone if you clear site data.</div>
       <p class="disclaimer">Independent student project, not an official UC Berkeley / CS 61A service. Questions and answers are transcribed from CS 61A Fall 2025 and Spring 2025 Midterm 2 and credited on each question. Explanations were written for this prototype and are not official.</p>
     </main>`;
   }
 
+  // ───────────────────────────── Exam setup & history (home, Exam Mode) ─────────────────────────────
+  const topicLabel = (id) => TOPICS.find((t) => t.id === id).name;
+  const when = (ts) => new Date(ts).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  const examMinutesOk = (p) => !p.timerOn || (Number.isInteger(p.minutes) && p.minutes >= 1 && p.minutes <= EXAM_MAX_MINUTES);
+  // "Exclusive — Fall 2025 MT2 — Q4 — Linked Lists, Lists & Mutation" (names repeat across exams, so the exam is always shown)
+  function groupLine(pid) {
+    const pr = PROBLEMS[pid];
+    return `${pr.title} — ${shortExam(pr.exam)} — Q${pr.number} — ${groupTopics(pid).map(topicLabel).join(', ')}`;
+  }
+
+  function examResumeHTML() {
+    const ex = store.exam;
+    if (!ex) return '';
+    const done = ex.ids.filter((id) => hasAnswer(ex, id)).length;
+    return `<div class="resume" role="region" aria-label="Unfinished exam">
+      <div><strong>Unfinished exam: ${esc(ex.title)}</strong>
+        <span class="hint">${kindLabel(ex)} · Question ${ex.index + 1} of ${ex.groups.length} · ${done} of ${ex.ids.length} parts answered · ${ex.timer ? `${fmt(timeLeft(ex.timer))} left${ex.timer.runningSince ? '' : ' (paused)'}` : 'Untimed'}</span></div>
+      <div class="actions"><button class="btn btn-primary" data-action="resume-exam">Resume Exam</button><button class="btn" data-action="discard-exam">Discard</button></div>
+    </div>`;
+  }
+
+  // Topic-based exams: filter + search narrow the list; the selection is kept in click order and never
+  // changed by filtering. Nothing is ever selected automatically.
+  function pickCandidates() {
+    const p = store.examPrefs;
+    const q = ui.examQuery.trim().toLowerCase();
+    return Object.keys(PROBLEMS).filter((pid) => partsOf(pid).length &&
+      (!p.topics.length || groupTopics(pid).some((t) => p.topics.includes(t))) &&
+      (!q || groupLine(pid).toLowerCase().includes(q)));
+  }
+  function pickListHTML() {
+    const p = store.examPrefs;
+    const list = pickCandidates();
+    if (!list.length) return '<p class="hint pick-empty">No questions match these filters.</p>';
+    return list.map((pid) => {
+      const parts = partsOf(pid);
+      const pts = groupPoints(pid);
+      const diffs = DIFFS.filter((d) => parts.some((q) => q.difficulty === d));
+      const on = p.picked.includes(pid);
+      return `<label class="pick-row${on ? ' on' : ''}"><input type="checkbox" data-pick="${pid}" ${on ? 'checked' : ''}>
+        <span class="pick-txt"><span class="pick-name">${esc(groupLine(pid))}</span>
+          <span class="pick-meta">${parts.length} part${parts.length === 1 ? '' : 's'}${typeof pts === 'number' ? ` · ${fmtPts(pts)} pts` : ''}${diffs.length ? ` · ${diffs.length > 1 ? `${diffs[0]}–${diffs[diffs.length - 1]}` : diffs[0]}` : ''}</span></span></label>`;
+    }).join('');
+  }
+  function pickedHTML() {
+    const p = store.examPrefs;
+    const n = p.picked.length;
+    const parts = p.picked.reduce((t, pid) => t + partsOf(pid).length, 0);
+    const items = p.picked.map((pid) => {
+      const pr = PROBLEMS[pid];
+      const where = `${shortExam(pr.exam)} Q${pr.number}`;
+      return `<li><span>${esc(pr.title)} <small>${esc(where)}</small></span><button class="unpick" data-action="unpick" data-pid="${pid}" aria-label="Remove ${esc(pr.title)} (${esc(where)})">✕</button></li>`;
+    }).join('');
+    return `<div class="picked-head"><span><b>${n}</b> question group${n === 1 ? '' : 's'} · <b>${parts}</b> part${parts === 1 ? '' : 's'}</span>
+        ${n ? '<button class="link" data-action="pick-clear">Clear selection</button>' : ''}</div>
+      ${n ? `<ol class="picked-list">${items}</ol>` : '<p class="hint">Check questions to add them. The exam uses the order you pick them in.</p>'}`;
+  }
+
+  function renderExamSetup() {
+    const p = store.examPrefs;
+    const opt = (name, pref, value, on, title, sub, extra) => `<label class="kind-opt${on ? ' on' : ''}"><input type="radio" id="${name}-${value}" name="${name}" data-xpref="${pref}" value="${value}" ${on ? 'checked' : ''}>
+      <span class="kind-txt"><b>${title}</b><small>${sub}</small></span>${extra || ''}</label>`;
+    let config;
+    if (p.kind === 'full') {
+      config = `<div class="kind-list" role="radiogroup" aria-label="Past exam">${Object.values(EXAMS).map((e) => {
+        const gs = examGroups(e.id);
+        const parts = gs.reduce((t, pid) => t + partsOf(pid).length, 0);
+        const pts = gs.reduce((t, pid) => t + (groupPoints(pid) || 0), 0);
+        const badge = e.complete ? '<span class="tag tag-ok">Complete</span>' : '<span class="tag tag-warn">Incomplete transcription</span>';
+        return opt('exam-id', 'examId', e.id, p.examId === e.id, esc(e.label), `${gs.length} questions · ${parts} parts · ${fmtPts(pts)} points · original order`, badge);
+      }).join('')}</div>`;
+    } else {
+      const avail = TOPICS.filter((t) => Object.keys(PROBLEMS).some((pid) => groupTopics(pid).includes(t.id)));
+      config = `<div class="chips" role="group" aria-label="Filter by topic">${avail.map((t) =>
+        `<button class="chip" id="xt-${t.id}" data-action="xtopic" data-id="${t.id}" aria-pressed="${p.topics.includes(t.id)}">${esc(t.name)}</button>`).join('')}
+        ${p.topics.length ? '<button class="link" data-action="xtopics-clear">Clear filters</button>' : ''}</div>
+        <input type="search" id="exam-search" class="pick-search" placeholder="Search by name, exam, or question number" value="${esc(ui.examQuery)}" aria-label="Search questions" autocomplete="off">
+        <div class="pick-cols">
+          <div class="pick-list" id="pick-list" role="group" aria-label="Questions">${pickListHTML()}</div>
+          <div class="picked" id="picked" aria-live="polite">${pickedHTML()}</div>
+        </div>
+        <p class="hint">Topic filters show questions matching any selected topic. Filtering and searching never change your selection.</p>`;
+    }
+    const timer = `<div class="timer-config">
+        <label><input type="radio" id="exam-timer-off" name="exam-timer" data-xpref="timerOn" value="off" ${p.timerOn ? '' : 'checked'}> Untimed</label>
+        <label><input type="radio" id="exam-timer-on" name="exam-timer" data-xpref="timerOn" value="on" ${p.timerOn ? 'checked' : ''}> Countdown</label>
+        <label><input type="number" id="exam-min" min="1" max="${EXAM_MAX_MINUTES}" step="1" value="${esc(p.minutes)}" ${p.timerOn ? '' : 'disabled'} aria-label="Minutes (1 to ${EXAM_MAX_MINUTES})"> min</label>
+      </div>
+      ${examMinutesOk(p) ? `<p class="hint">${EXAM_DEFAULT_MINUTES} minutes is this site's suggested default, <b>not</b> an official time limit (the exams' limits aren't recorded here). Use any whole number from 1 to ${EXAM_MAX_MINUTES}. The timer pauses only when you Save &amp; Leave, and the exam is submitted automatically at 0:00.</p>`
+        : `<p class="err" role="alert">Enter a whole number from 1 to ${EXAM_MAX_MINUTES}.</p>`}`;
+    return `<section class="setup-card exam-setup" aria-label="Exam setup">
+      <div class="step"><h3><span class="step-n">1</span>Exam type</h3><div class="kind-row" role="radiogroup" aria-label="Exam type">
+        ${opt('exam-kind', 'kind', 'full', p.kind === 'full', 'Full past exam', 'Every question of one midterm, in its original order')}
+        ${opt('exam-kind', 'kind', 'custom', p.kind === 'custom', 'Topic-based exam', 'Pick specific questions, filtered by topic')}</div></div>
+      <div class="step"><h3><span class="step-n">2</span>${p.kind === 'full' ? 'Choose an exam' : 'Choose questions'}</h3>${config}</div>
+      <div class="step"><h3><span class="step-n">3</span>Timer</h3>${timer}</div>
+      <div class="start-row" id="exam-start">${examStartHTML()}</div>
+    </section>`;
+  }
+  function examStartHTML() {
+    const p = store.examPrefs;
+    const count = p.kind === 'full' ? examGroups(p.examId).length : p.picked.length;
+    return `<div class="summary">${count ? `<b>${count}</b> question${count === 1 ? '' : 's'}` : 'No questions selected'} · answers and solutions stay hidden until you submit</div>
+      <button class="btn btn-primary btn-lg" data-action="start-exam" ${count && examMinutesOk(p) ? '' : 'disabled'}>Start Exam →</button>`;
+  }
+  // Selection changed: patch the checkboxes, the selected panel and the Start button in place
+  // (a full re-render would reset the list's scroll position).
+  function refreshPicker() {
+    const picked = store.examPrefs.picked;
+    document.querySelectorAll('#pick-list [data-pick]').forEach((cb) => {
+      cb.checked = picked.includes(cb.dataset.pick);
+      cb.closest('.pick-row').classList.toggle('on', cb.checked);
+    });
+    const panel = document.getElementById('picked');
+    if (panel) panel.innerHTML = pickedHTML();
+    const start = document.getElementById('exam-start');
+    if (start) start.innerHTML = examStartHTML();
+  }
+
+  function scoreText(sc) {
+    return `${sc.partial ? 'Partial Score' : 'Final Score'} ${fmtPts(sc.earned)} / ${fmtPts(sc.possible)}`;
+  }
+  function renderHistory() {
+    if (!store.attempts.length) return '';
+    const rows = store.attempts.slice().reverse().map((a) => `<button class="result-row hist-row" data-action="open-attempt" data-id="${a.id}">
+        <span class="t">${esc(a.title)}<small>${kindLabel(a)} · ${when(a.finishedAt)} · ${fmt(activeMs(a))} spent${a.autoSubmitted ? ' · time ran out' : ''}</small></span>
+        <span class="badge ${examScore(a).partial ? 'ungraded' : 'correct'}">${scoreText(examScore(a))}</span></button>`).join('');
+    return `<section class="history" aria-label="Exam history"><h2>Exam history</h2><div class="result-list">${rows}</div>
+      <p class="hint">Every submitted attempt is kept, including retakes. Click one to see its results and review it.</p></section>`;
+  }
+
   const ICONS = {
-    hl: '<path d="M4 15l3 3M5 16l8.5-8.5 3 3L8 19H5z" /><path d="M13.5 7.5l2-2 3 3-2 2" /><path d="M3 21h8" stroke="#e9c400" stroke-width="3"/>',
+    hl:'<path d="M4 15l3 3M5 16l8.5-8.5 3 3L8 19H5z" /><path d="M13.5 7.5l2-2 3 3-2 2" /><path d="M3 21h8" stroke="#e9c400" stroke-width="3"/>',
     pen: '<path d="M4 20l1-4L16 5l3 3L8 19z" /><path d="M14 7l3 3" />',
     eraser: '<path d="M8 20h11" /><path d="M5 15l8-9 6 6-6 7H9z" /><path d="M9 11l6 6" />',
     undo: '<path d="M9 7L5 11l4 4" /><path d="M5 11h9a5 5 0 010 10h-3" />',
@@ -773,7 +1103,8 @@
     const topicIds = [...new Set(g.ids.flatMap((id) => QMAP[id].topics))];
     const topics = topicIds.map((t) => `<span class="tag">${esc(TOPICS.find((x) => x.id === t).name)}</span>`).join('');
     const tool = (k, label, extra) => `<button class="ann-btn" data-ann="${k}" title="${label}" aria-label="${label}" ${extra || ''}>${icon(k)}</button>`;
-    return `<div class="annot-bar" id="annot-bar" role="toolbar" aria-label="Annotation tools">
+    const ro = locked(cur());
+    const bar = ro ? '<div class="annot-bar"><span class="annot-hint">Read-only review: your scratch code and annotations from this attempt.</span></div>' : `<div class="annot-bar" id="annot-bar" role="toolbar" aria-label="Annotation tools">
         ${tool('hl', 'Highlighter (select text)', 'aria-pressed="false"')}
         ${tool('pen', 'Red pen', 'aria-pressed="false"')}
         ${tool('eraser', 'Eraser', 'aria-pressed="false"')}
@@ -781,7 +1112,8 @@
         ${tool('undo', 'Undo')}${tool('redo', 'Redo')}
         ${tool('clear', 'Clear all annotations')}
         <span class="annot-hint" id="annot-hint" aria-live="polite"></span>
-      </div>
+      </div>`;
+    return `${bar}
       <article class="problem" id="problem-article" data-mode="${ui.annMode}" aria-label="Problem">
         <div class="src"><span>Source: <a href="${esc(ex.url)}" target="_blank" rel="noopener">${esc(ex.label)}</a>, Q${esc(pr.number)}</span>${topics}</div>
         <h2>${esc(pr.number)}. <span class="pts">(${pr.points.toFixed(1)} points)</span>${esc(pr.title)}</h2>
@@ -789,12 +1121,12 @@
         <div class="editor">
           <div class="editor-head">
             <span class="editor-file">${esc(fileName(g.pid))}</span>
-            <span class="editor-status" id="editor-status">${editedNotes(g.pid) ? 'Saved in this browser' : 'Editable: type notes or code'}</span>
-            <span class="editor-tools"><button class="btn btn-sm ed-btn" id="editor-reset" data-action="reset-code" ${editedNotes(g.pid) ? '' : 'disabled'} title="Restore the original exam code">Reset code</button></span>
+            <span class="editor-status" id="editor-status">${ro ? 'Read-only' : editedNotes(g.pid) ? 'Saved in this browser' : 'Editable: type notes or code'}</span>
+            ${ro ? '' : `<span class="editor-tools"><button class="btn btn-sm ed-btn" id="editor-reset" data-action="reset-code" ${editedNotes(g.pid) ? '' : 'disabled'} title="Restore the original exam code">Reset code</button></span>`}
           </div>
           <div id="editor-host"></div>
         </div>
-        <p class="editor-hint">Your answers on the right appear in the blanks automatically: <span class="key-fill key-mc">selected choice</span> <span class="key-fill key-typed">typed answer</span>. Click a blank to jump to its part. You can also type notes or <code>#</code> comments anywhere in the code; nothing is run. <kbd>Tab</kbd> indents, <kbd>⌘/</kbd> toggles a comment.</p>
+        <p class="editor-hint">${ro ? 'Blanks show your submitted answers: <span class="key-fill key-mc">selected choice</span> <span class="key-fill key-typed">typed answer</span>.</p>' : `Your answers on the right appear in the blanks automatically: <span class="key-fill key-mc">selected choice</span> <span class="key-fill key-typed">typed answer</span>. Click a blank to jump to its part. You can also type notes or <code>#</code> comments anywhere in the code; nothing is run. <kbd>Tab</kbd> indents, <kbd>⌘/</kbd> toggles a comment.</p>`}
         <div class="annot-text" data-annot="outro"></div>
         <svg class="annot-layer" aria-hidden="true"></svg>
       </article>`;
@@ -827,11 +1159,12 @@
   function renderChoices(q, s) {
     const a = s.answers[q.id];
     const key = ANSWER_KEY[q.id];
-    const revealed = !!s.revealed[q.id];
-    const checked = s.checked[q.id];
+    const review = locked(s);
+    const revealed = review || (!isExam(s) && !!s.revealed[q.id]);
+    const checked = !isExam(s) && s.checked[q.id];
     const multi = q.type === 'multi_select';
     const correctSet = new Set(multi ? key.correct : [key.correct]);
-    const elim = eliminated(s, q.id);
+    const elim = review ? [] : eliminated(s, q.id); // review is a clean read-only view
     const items = q.choices.map((c, i) => {
       const selected = multi ? (a || []).includes(i) : a === i;
       const out = elim.includes(i);
@@ -844,7 +1177,7 @@
       }
       const id = `c-${q.id}-${i}`;
       // The eliminate button sits beside the label (not inside it), so clicking it never selects the choice.
-      const elimBtn = `<button type="button" class="elim-btn${out ? ' undo' : ''}" id="x-${q.id}-${i}" data-action="eliminate" data-i="${i}"
+      const elimBtn = review ? '' : `<button type="button" class="elim-btn${out ? ' undo' : ''}" id="x-${q.id}-${i}" data-action="eliminate" data-i="${i}"
           aria-label="${out ? 'Undo elimination of' : 'Eliminate'} option ${letter(i)}" title="${out ? 'Undo elimination' : `Eliminate option ${letter(i)}`}">${out ? 'Undo' : `<span class="elim-mark" aria-hidden="true">${letter(i)}</span>`}</button>`;
       return `<li><label class="choice ${cls}${out ? ' eliminated' : ''}" for="${id}">
         <input type="${multi ? 'checkbox' : 'radio'}" id="${id}" name="${q.id}" value="${i}" data-qid="${q.id}" ${selected ? 'checked' : ''} ${revealed ? 'disabled' : ''}>
@@ -888,20 +1221,37 @@
     return parts.join('');
   }
 
+  // After an exam is submitted: the part's result plus the official answer and explanation.
+  function renderReview(q, s) {
+    const st = examStatus(s, q.id);
+    const head = {
+      correct: '<div class="verdict">✓ Correct</div>',
+      incorrect: '<div class="verdict">✗ Incorrect</div>',
+      skipped: '<div class="verdict">Unanswered</div>',
+      staff: '<div class="verdict">Graded by Course Staff</div><p class="staff-note">This question requires manual grading and will not be graded on this platform.</p>',
+    }[st];
+    const cls = { correct: 'good', incorrect: 'bad', skipped: 'info', staff: 'info' }[st];
+    return `<div class="feedback ${cls}">${head}${officialAnswerHTML(q)}</div>`;
+  }
+
   function renderPart(q, s) {
     const id = q.id;
-    const revealed = !!s.revealed[id];
+    const exam = isExam(s);
+    const review = locked(s);
+    const revealed = review || (!exam && !!s.revealed[id]);
     const pts = q.points === null || q.points === undefined ? '' : `<span class="pts">(${q.points.toFixed(1)} pt)</span>`;
     let response;
     if (isMC(q)) {
       response = renderChoices(q, s);
     } else {
       response = `<div class="answer-box ${q.type === 'code' ? 'code' : ''}"><textarea id="ta-${id}" data-qid="${id}" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Your answer for part ${esc(q.label)}" ${revealed ? 'readonly' : ''} placeholder="${q.type === 'code' ? 'Write your code here…' : 'Type your answer…'}">${esc(s.answers[id] || '')}</textarea></div>
-        ${q.type === 'code' ? '<p class="selfcheck-note">Self-check: code responses are saved but not auto-graded. Show the solution to compare.</p>' : '<p class="selfcheck-note">Checked against the official answer, ignoring spaces and quote style.</p>'}`;
+        ${exam ? (q.type === 'code' && !review ? '<p class="selfcheck-note">Code responses are saved with your exam. They are not graded on this platform.</p>' : '')
+          : q.type === 'code' ? '<p class="selfcheck-note">Self-check: code responses are saved but not auto-graded. Show the solution to compare.</p>' : '<p class="selfcheck-note">Checked against the official answer, ignoring spaces and quote style.</p>'}`;
     }
     const confirming = ui.confirmReveal === id;
     const canCheck = q.type !== 'code' && !revealed;
-    const actions = `<div class="q-actions">
+    // Exams never offer Check Answer / Show Solution; feedback exists only in practice and in post-submit review.
+    const actions = exam ? '' : `<div class="q-actions">
       ${canCheck ? `<button class="btn btn-primary" data-action="check" ${hasAnswer(s, id) ? '' : 'disabled'}>Check Answer</button>` : ''}
       ${revealed ? '' : confirming
         ? `<span style="align-self:center">Reveal the answer?</span><button class="btn" data-action="reveal-yes" id="reveal-yes-${id}">Yes, show it</button><button class="btn btn-ghost" data-action="reveal-no">Cancel</button>`
@@ -909,10 +1259,10 @@
     </div>`;
     return `<div class="part${ui.activeBlank && ui.activeBlank === q.blank ? ' active' : ''}" id="part-${id}" data-part="${id}" data-blank="${esc(q.blank || '')}">
       <p class="q-head"><span class="lbl">${esc(q.label)}</span>${pts}${inline(q.prompt)}
-        <span class="part-meta">${TYPE_LABEL[q.type]} · <span class="diff-${q.difficulty}">${q.difficulty}</span></span></p>
+        <span class="part-meta">${exam && q.type === 'code' ? 'Code response' : TYPE_LABEL[q.type]} · <span class="diff-${q.difficulty}">${q.difficulty}</span></span></p>
       ${response}
       ${actions}
-      ${renderFeedback(q, s)}
+      ${review ? renderReview(q, s) : exam ? '' : renderFeedback(q, s)}
     </div>`;
   }
 
@@ -921,9 +1271,9 @@
     const done = g.ids.filter((id) => hasAnswer(s, id)).length;
     return `<section class="question" aria-label="Question ${s.index + 1}">
       <div class="q-bar"><span class="q-num">${s.index + 1}</span>
-        <button class="mark-btn" data-action="mark" aria-pressed="${marked}" title="Mark for review (M)">
+        ${locked(s) ? `<span class="mark-btn static">${marked ? 'Marked for review' : ''}</span>` : `<button class="mark-btn" data-action="mark" aria-pressed="${marked}" title="Mark for review (M)">
           <svg viewBox="0 0 16 20" aria-hidden="true"><path d="M2 1.5h12v17l-6-4.5-6 4.5z" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
-          ${marked ? 'Marked for Review' : 'Mark for Review'}</button>
+          ${marked ? 'Marked for Review' : 'Mark for Review'}</button>`}
         <span class="qtype">${g.ids.length > 1 ? `${g.ids.length} parts · ${done} answered` : TYPE_LABEL[QMAP[g.ids[0]].type]}</span></div>
       ${g.ids.map((id) => renderPart(QMAP[id], s)).join('<hr class="part-sep">')}
     </section>`;
@@ -953,40 +1303,59 @@
       <p class="nav-sub">${esc(s.title)}</p>
       <div class="legend"><span><span class="sw cur"></span>Current</span><span><span class="sw"></span>Unanswered</span><span><span class="sw part"></span>Partly answered</span><span><span class="sw ans"></span>Answered</span><span><span class="sw mk"></span>For Review</span></div>
       <div class="nav-grid">${cells}</div>
-      <div class="go-review"><button class="btn" data-action="finish">Go to Review Page</button></div>
+      ${locked(s) ? '' : `<div class="go-review">${isExam(s) ? '<button class="btn" data-action="submit-exam">Submit Exam</button>' : '<button class="btn" data-action="finish">Go to Review Page</button>'}</div>`}
     </div>`;
   }
 
   function headerHTML(s) {
     const t = s.timer;
-    const left = timeLeft(t);
-    const timer = t ? `<div class="timer" aria-label="Timer">
+    const exam = isExam(s);
+    let timer;
+    if (locked(s)) timer = `<div class="timer"><span class="hint">Submitted ${esc(when(s.finishedAt))}</span></div>`;
+    else if (t) {
+      const left = timeLeft(t);
+      // Exams can't be paused or reset here; only Save & Leave pauses the clock.
+      const ctl = exam ? '' : `${t.expired ? '' : `<button class="btn btn-sm" data-action="${t.runningSince ? 'pause' : 'resume-timer'}">${t.runningSince ? 'Pause' : 'Resume'}</button>`}
+          <button class="btn btn-sm opt" data-action="reset-timer" title="Reset to ${t.durationMs / 60000}:00">Reset</button>`;
+      timer = `<div class="timer" aria-label="Timer">
         <span id="clock" class="clock ${left <= 60000 ? 'low' : ''} ${ui.hideClock ? 'hidden-clock' : ''}" role="timer" aria-live="off">${fmt(left)}</span>
-        <span class="tctl">
-          ${t.expired ? '' : `<button class="btn btn-sm" data-action="${t.runningSince ? 'pause' : 'resume-timer'}">${t.runningSince ? 'Pause' : 'Resume'}</button>`}
-          <button class="btn btn-sm opt" data-action="reset-timer" title="Reset to ${t.durationMs / 60000}:00">Reset</button>
-          <button class="btn btn-sm btn-ghost opt" data-action="hide-clock">${ui.hideClock ? 'Show' : 'Hide'}</button>
-        </span></div>`
-      : '<div class="timer"><span class="hint">Timer off</span></div>';
-    return `<div class="left"><div class="brand">CS 61A Practice</div>
-        <div class="set-name">${esc(s.title)} · <button class="directions-btn" data-action="directions" aria-expanded="${ui.dirOpen}">Directions ▾</button></div></div>
+        <span class="tctl">${ctl}
+          <button class="btn btn-sm btn-ghost${exam ? '' : ' opt'}" data-action="hide-clock">${ui.hideClock ? 'Show' : 'Hide'}</button>
+        </span></div>`;
+    } else timer = `<div class="timer"><span class="hint">${exam ? 'Untimed' : 'Timer off'}</span></div>`;
+    const directions = exam ? `<p>Answer every part; nothing is graded until you <b>Submit Exam</b>, and no answers or solutions are shown before then. You can eliminate choices, mark questions for review, and jump between questions with the navigator.</p>
+        <p><b>Save &amp; Leave</b> pauses the timer and keeps everything (answers, scratch code, annotations, eliminations, marks) for later.${t ? ' When the timer reaches 0:00 the exam is submitted automatically.' : ''}</p>`
+      : '<p>All parts of a question are shown together on the right. Your answers fill the matching blanks in the code on the left. Use <b>Check Answer</b> to grade a part, or <b>Show Solution</b> to see the official answer.</p>';
+    return `<div class="left"><div class="brand">${exam ? 'CS 61A Exam' : 'CS 61A Practice'}</div>
+        <div class="set-name">${esc(s.title)} · ${exam ? `<span class="mode-tag">${locked(s) ? 'Review' : 'Exam'}</span> · ` : ''}<button class="directions-btn" data-action="directions" aria-expanded="${ui.dirOpen}">Directions ▾</button></div></div>
       <div class="center"><span class="progress">Q ${s.index + 1} / ${s.groups.length}</span></div>
       ${timer}
-      ${ui.dirOpen ? `<div class="directions" role="dialog" aria-label="Directions"><p style="margin-top:0">${esc(BUBBLE_NOTE)}</p><p>All parts of a question are shown together on the right. Your answers fill the matching blanks in the code on the left. Use <b>Check Answer</b> to grade a part, or <b>Show Solution</b> to see the official answer.</p><p>Annotate the problem with the toolbar on the left: highlighter, red pen, eraser, undo/redo.</p><p style="margin-bottom:0">Keyboard: <code>←</code>/<code>→</code> previous/next question, <code>M</code> mark for review, <code>Esc</code> closes the question navigator.</p></div>` : ''}`;
+      ${ui.dirOpen ? `<div class="directions" role="dialog" aria-label="Directions"><p style="margin-top:0">${esc(BUBBLE_NOTE)}</p>${directions}<p>Annotate the problem with the toolbar on the left: highlighter, red pen, eraser, undo/redo.</p><p style="margin-bottom:0">Keyboard: <code>←</code>/<code>→</code> previous/next question, <code>M</code> mark for review, <code>Esc</code> closes the question navigator.</p></div>` : ''}`;
   }
   function bannerHTML(s) {
+    if (locked(s)) return `<div class="review-banner" role="note"><span>Reviewing a submitted exam. Answers can’t be changed.</span><button class="btn btn-sm" data-action="exam-results">Back to results</button></div>`;
+    if (isExam(s)) return '';
     return s.timer && s.timer.expired
       ? `<div class="expired-banner" role="alert"><span>⏰ Time’s up. Your answers are saved, so you can keep reviewing or finish.</span><button class="btn btn-sm" data-action="finish">Finish set</button></div>` : '';
   }
   function footerHTML(s) {
     const isLast = s.index === s.groups.length - 1;
-    return `<div class="left"><button class="btn btn-ghost" data-action="home">← Exit</button></div>
+    const exam = isExam(s);
+    const review = locked(s);
+    // Exams: Next stops at the last question; only Submit Exam ends the attempt.
+    const right = exam
+      ? `<button class="btn btn-primary" data-action="prev" ${s.index === 0 ? 'disabled' : ''}>Back</button>
+        <button class="btn btn-primary" data-action="next" ${isLast ? 'disabled' : ''}>Next</button>
+        ${review ? '' : '<button class="btn btn-submit" data-action="submit-exam">Submit Exam</button>'}`
+      : `<button class="btn btn-primary" data-action="prev" ${s.index === 0 ? 'disabled' : ''}>Back</button>
+        <button class="btn btn-primary" data-action="${isLast ? 'finish' : 'next'}">${isLast ? 'Finish' : 'Next'}</button>`;
+    const left = review ? '<button class="btn btn-ghost" data-action="exam-results">← Results</button>'
+      : exam ? '<button class="btn" data-action="save-leave">Save &amp; Leave</button>'
+      : '<button class="btn btn-ghost" data-action="home">← Exit</button>';
+    return `<div class="left">${left}</div>
       <div class="center"><button class="nav-toggle" id="nav-toggle" data-action="toggle-nav" aria-expanded="${ui.navOpen}" aria-haspopup="dialog"${ui.navOpen ? ' aria-controls="navigator"' : ''}>Question ${s.index + 1} of ${s.groups.length} <span aria-hidden="true">${ui.navOpen ? '▾' : '▴'}</span></button></div>
-      <div class="right">
-        <button class="btn btn-primary" data-action="prev" ${s.index === 0 ? 'disabled' : ''}>Back</button>
-        <button class="btn btn-primary" data-action="${isLast ? 'finish' : 'next'}">${isLast ? 'Finish' : 'Next'}</button>
-      </div>
-      ${ui.navOpen ? renderNavigator(s) : ''}`;
+      <div class="right">${right}</div>
+      ${ui.navOpen ? renderNavigator(s, !exam) : ''}`;
   }
   function renderPracticeShell(s) {
     return `<div class="practice">
@@ -997,7 +1366,7 @@
         <div class="pane pane-left" id="pane-left"></div>
         <div class="pane pane-right" id="pane-right"></div>
       </div>
-      <footer class="p-footer" id="p-footer">${footerHTML(s)}</footer>
+      <footer class="p-footer${isExam(s) ? ' exam' : ''}" id="p-footer">${footerHTML(s)}</footer>
     </div>`;
   }
 
@@ -1040,6 +1409,61 @@
     </main>`;
   }
 
+  // Score report for a submitted exam attempt. Only a fully gradable attempt gets a "Final Score".
+  function renderExamResults(a) {
+    const sc = examScore(a);
+    const label = { correct: 'Correct', incorrect: 'Incorrect', skipped: 'Unanswered', staff: 'Graded by Course Staff' };
+    const rows = a.groups.map((g, gi) => g.ids.map((id) => {
+      const q = QMAP[id];
+      const pr = PROBLEMS[q.problem];
+      const st = examStatus(a, id);
+      const pts = st === 'staff' ? '—' : hasPoints(q) ? `${fmtPts(st === 'correct' ? q.points : 0)} / ${fmtPts(q.points)}` : 'n/a';
+      return `<tr>
+        <th scope="row">${gi + 1}${g.ids.length > 1 ? ` <span class="sub">${esc(q.label)}</span>` : ''}</th>
+        <td>${esc(shortExam(pr.exam))} Q${esc(pr.number)}<small>${esc(pr.title)}</small></td>
+        <td>${q.topics.map((t) => esc(topicLabel(t))).join(', ')}</td>
+        <td class="num">${pts}</td>
+        <td><span class="badge ${st === 'skipped' ? 'skipped' : st === 'staff' ? 'ungraded' : st}">${label[st]}</span></td>
+        <td><button class="btn btn-sm" data-action="exam-review" data-i="${gi}" data-q="${id}" aria-label="Review question ${gi + 1} ${esc(q.label)}">Review</button></td>
+      </tr>`;
+    }).join('')).join('');
+    const notes = [];
+    if (sc.staff) notes.push(`${sc.staff} part${sc.staff === 1 ? ' is' : 's are'} graded by course staff and not scored here`);
+    if (sc.unknown) notes.push(`${sc.unknown} part${sc.unknown === 1 ? ' has' : 's have'} no published point value`);
+    const scoreNote = sc.partial
+      ? `Partial: counts only parts graded on this platform with known point values. ${notes.join('; ')}.`
+      : 'Every part was graded automatically and every point value is known.';
+    return `<main class="results exam-results">
+      <p class="eyebrow">Exam results</p>
+      <h1>${esc(a.title)}</h1>
+      <p class="hint">${kindLabel(a)} · Submitted ${esc(when(a.finishedAt))}${a.autoSubmitted ? ' · <b>Time ran out, so the exam was submitted automatically</b>' : ''}</p>
+      <section class="score-card" aria-label="Score">
+        <div class="score-main">
+          <div class="k">${sc.partial ? 'Partial Score' : 'Final Score'}</div>
+          <div class="v">${fmtPts(sc.earned)}<span> / ${fmtPts(sc.possible)}</span></div>
+          <p class="hint">${esc(scoreNote)}</p>
+        </div>
+        <div class="stats">
+          <div class="stat good"><div class="v">${sc.counts.correct}</div><div class="k">Correct parts</div></div>
+          <div class="stat bad"><div class="v">${sc.counts.incorrect}</div><div class="k">Incorrect parts</div></div>
+          <div class="stat"><div class="v">${sc.counts.staff}</div><div class="k">Graded by course staff</div></div>
+          <div class="stat"><div class="v">${sc.counts.skipped}</div><div class="k">Unanswered parts</div></div>
+          <div class="stat"><div class="v">${fmt(activeMs(a))}</div><div class="k">Time spent${a.timer ? ` of ${fmt(a.timer.durationMs)}` : ' (untimed)'}</div></div>
+        </div>
+      </section>
+      <div class="actions">
+        <button class="btn btn-primary" data-action="exam-review" data-i="0">Review answers</button>
+        <button class="btn" data-action="retake">Retake this exam</button>
+        <button class="btn" data-action="home">Back to home</button>
+      </div>
+      <div class="table-wrap"><table class="result-table">
+        <thead><tr><th scope="col">Question</th><th scope="col">Original exam</th><th scope="col">Topic</th><th scope="col" class="num">Points</th><th scope="col">Your result</th><th scope="col"><span class="sr-only">Review</span></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      <p class="hint">Choices and short answers are graded automatically against the official answer and its accepted equivalents (ignoring spaces and quote style). Code-writing parts are left for course staff; nothing is sent anywhere.</p>
+    </main>`;
+  }
+
   // ───────────────────────────── Render loop ─────────────────────────────
   let rendering = false;
   function render() {
@@ -1053,15 +1477,19 @@
     const activeId = active && active.id;
     const sel = active && active.tagName === 'TEXTAREA' ? [active.selectionStart, active.selectionEnd] : null;
 
-    if ((ui.screen === 'practice' || ui.screen === 'results') && !store.session) ui.screen = 'home';
+    if (ui.screen === 'practice' && !cur()) { setView('practice'); ui.screen = 'home'; }
+    if (ui.screen === 'results' && !store.session) ui.screen = 'home';
+    if (ui.screen === 'exam-results' && !attemptById(ui.attemptId)) ui.screen = 'home';
 
     if (ui.screen === 'practice') {
-      const s = store.session;
+      const s = cur();
       const g = curGroup();
-      if (!document.getElementById('pane-left')) {
+      const shell = `${ui.view}:${ui.attemptId || ''}`; // practice, exam and review each get a fresh shell
+      if (!document.getElementById('pane-left') || app.dataset.shell !== shell) {
         detachEditors();
         leftPid = null;
         app.innerHTML = renderPracticeShell(s);
+        app.dataset.shell = shell;
       } else { // patch everything except the left pane
         document.getElementById('p-header').innerHTML = headerHTML(s);
         document.getElementById('p-banner').innerHTML = bannerHTML(s);
@@ -1074,13 +1502,15 @@
       if (!sameGroup) right.scrollTop = 0;
       if (leftPid !== g.pid) buildLeft(g);
       fillBlanks(editors[g.pid]);
-      document.title = `Q${s.index + 1} · CS 61A Practice`;
+      document.title = `Q${s.index + 1} · ${isExam(s) ? (locked(s) ? 'Exam review' : 'Exam') : 'CS 61A Practice'}`;
     } else {
       detachEditors();
       if (leftObserver) leftObserver.disconnect();
       leftPid = null;
-      app.innerHTML = ui.screen === 'results' ? renderResults() : ui.screen === 'landing' ? renderLanding() : renderHome();
-      document.title = 'CS 61A Practice';
+      app.dataset.shell = '';
+      app.innerHTML = ui.screen === 'results' ? renderResults() : ui.screen === 'exam-results' ? renderExamResults(attemptById(ui.attemptId))
+        : ui.screen === 'landing' ? renderLanding() : renderHome();
+      document.title = ui.screen === 'exam-results' ? 'Exam results · CS 61A Practice' : 'CS 61A Practice';
     }
 
     if (activeId) {
@@ -1093,7 +1523,7 @@
   }
 
   function go(i) {
-    const s = store.session;
+    const s = cur();
     s.index = Math.max(0, Math.min(s.groups.length - 1, i));
     ui.confirmReveal = null;
     ui.activeBlank = null;
@@ -1145,7 +1575,8 @@
     if (!btn || btn.disabled) return;
     const a = btn.dataset.action;
     const p = store.prefs;
-    const s = store.session;
+    const xp = store.examPrefs;
+    const s = cur(); // the session on the question screen (practice, live exam, or submitted attempt)
     const partEl = btn.closest('[data-part]');
     const q = partEl && QMAP[partEl.dataset.part];
     switch (a) {
@@ -1157,13 +1588,47 @@
       case 'topics-none': p.topics = []; break;
       case 'start':
         ui.menu = null;
-        if (s && !s.finished && !confirm('Starting a new set replaces your unfinished one. Continue?')) return;
+        if (store.session && !store.session.finished && !confirm('Starting a new set replaces your unfinished one. Continue?')) return;
         startFromPrefs(); return;
-      case 'resume': ui.screen = 'practice'; ui.menu = null; break;
+      case 'resume': setView('practice'); ui.screen = 'practice'; ui.menu = null; break;
       case 'discard': if (!confirm('Discard your unfinished set? Your answers in it will be lost.')) return; store.session = null; break;
-      case 'show-results': ui.screen = 'results'; break;
+      case 'show-results': setView('practice'); ui.screen = 'results'; break;
+      case 'mode': p.mode = btn.dataset.v; ui.menu = null; break;
+      // exam setup (home, Exam Mode)
+      case 'xtopic': toggleIn(xp.topics, btn.dataset.id); break;
+      case 'xtopics-clear': xp.topics = []; break;
+      case 'unpick': xp.picked = xp.picked.filter((pid) => pid !== btn.dataset.pid); save(); refreshPicker(); return;
+      case 'pick-clear': xp.picked = []; save(); refreshPicker(); announce('Selection cleared.'); return;
+      case 'start-exam':
+        if (store.exam && !confirm(`You have an unfinished exam (${store.exam.title}). Starting a new exam discards it. Continue?`)) return;
+        startExamFromPrefs(); return;
+      case 'resume-exam': resumeExam(); return;
+      case 'discard-exam':
+        if (!confirm('Discard your unfinished exam? Its answers will be lost. Submitted attempts in your history are kept.')) return;
+        store.exam = null; break;
+      case 'open-attempt': setView('review', btn.dataset.id); ui.screen = 'exam-results'; window.scrollTo(0, 0); break;
+      // exam taking & results
+      case 'save-leave': saveAndLeave(); return;
+      case 'submit-exam': if (!store.exam || !confirmSubmit()) return; submitExam(false); return;
+      case 'exam-results': ui.screen = 'exam-results'; ui.navOpen = false; ui.dirOpen = false; window.scrollTo(0, 0); break;
+      case 'exam-review': {
+        const at = attemptById(ui.attemptId);
+        ui.screen = 'practice';
+        at.index = Number(btn.dataset.i);
+        save(); render();
+        if (btn.dataset.q) focusPart(null, btn.dataset.q);
+        return;
+      }
+      case 'retake': {
+        const at = attemptById(ui.attemptId);
+        if (store.exam && !confirm(`You have an unfinished exam (${store.exam.title}). Retaking discards it. Continue?`)) return;
+        createExam(at.kind, at.examId, at.groups.map((g) => g.pid), at.timer ? at.timer.durationMs / 60000 : null);
+        return;
+      }
       // practice
-      case 'home': ui.screen = 'home'; ui.navOpen = false; ui.dirOpen = false; break;
+      case 'home':
+        if (ui.screen === 'exam-results') p.mode = 'exam';
+        setView('practice'); ui.screen = 'home'; ui.navOpen = false; ui.dirOpen = false; window.scrollTo(0, 0); break;
       case 'prev': go(s.index - 1); return;
       case 'next': go(s.index + 1); return;
       case 'goto': {
@@ -1178,41 +1643,47 @@
         focusEl(ui.navOpen ? `nav-${curGroup().pid}` : 'nav-toggle');
         return;
       case 'directions': ui.dirOpen = !ui.dirOpen; ui.navOpen = false; break;
-      case 'mark': { const pid = curGroup().pid; if (s.marked[pid]) delete s.marked[pid]; else s.marked[pid] = true; break; }
+      case 'mark': { if (locked(s)) return; const pid = curGroup().pid; if (s.marked[pid]) delete s.marked[pid]; else s.marked[pid] = true; break; }
       case 'check': {
+        if (isExam(s)) return; // no grading before an exam is submitted
         const ans = s.answers[q.id];
         if (isMC(q)) s.checked[q.id] = gradeMC(q, ans) ? 'correct' : 'incorrect';
         else s.checked[q.id] = matchesOfficial(q, ans) ? 'correct' : 'unmatched';
         announce(`Part ${q.label}: ${{ correct: 'Correct.', incorrect: 'Incorrect.', unmatched: 'Not an exact match. Show the solution to grade yourself.' }[s.checked[q.id]]}`);
         break;
       }
-      case 'reveal': ui.confirmReveal = q.id; render(); { const y = document.getElementById(`reveal-yes-${q.id}`); if (y) y.focus(); } return;
+      case 'reveal': if (isExam(s)) return; ui.confirmReveal = q.id; render(); { const y = document.getElementById(`reveal-yes-${q.id}`); if (y) y.focus(); } return;
       case 'reveal-no': ui.confirmReveal = null; break;
-      case 'reveal-yes': s.revealed[q.id] = true; ui.confirmReveal = null; announce('Solution shown.'); break;
-      case 'self': s.selfGrade[q.id] = btn.dataset.v; break;
+      case 'reveal-yes': if (isExam(s)) return; s.revealed[q.id] = true; ui.confirmReveal = null; announce('Solution shown.'); break;
+      case 'self': if (isExam(s)) return; s.selfGrade[q.id] = btn.dataset.v; break;
       case 'eliminate': {
+        if (locked(s)) return;
         const i = Number(btn.dataset.i);
         const on = !eliminated(s, q.id).includes(i);
         setEliminated(s, q.id, i, on);
         announce(`Option ${letter(i)} ${on ? 'eliminated' : 'restored'}.`);
         break;
       }
-      case 'pause': pauseTimer(s.timer); break;
-      case 'resume-timer': if (s.timer.remainingMs > 0) s.timer.runningSince = Date.now(); break;
+      case 'pause': if (isExam(s)) return; pauseTimer(s.timer); break;
+      case 'resume-timer': if (isExam(s)) return; if (s.timer.remainingMs > 0) s.timer.runningSince = Date.now(); break;
       case 'reset-timer':
+        if (isExam(s)) return;
         if (!confirm('Reset the timer to the full time?')) return;
         s.timer.remainingMs = s.timer.durationMs; s.timer.runningSince = Date.now(); s.timer.expired = false; break;
       case 'hide-clock': ui.hideClock = !ui.hideClock; break;
       case 'reset-code':
+        if (locked(s)) return;
         if (!confirm('Reset the code to the original? Your typed notes in the code (and code highlights) will be erased. Your answers stay.')) return;
         resetEditor(curGroup().pid); announce('Code reset to the original.'); return;
       case 'finish': {
+        if (isExam(s)) return;
         const un = s.ids.filter((id) => !hasAnswer(s, id)).length;
         if (!s.finished && un && !confirm(`${un} part${un === 1 ? ' is' : 's are'} unanswered. Finish anyway?`)) return;
         finishSession(); return;
       }
       // results
       case 'review': {
+        setView('practice');
         ui.screen = 'practice';
         s.index = Number(btn.dataset.i);
         save(); render();
@@ -1267,6 +1738,19 @@
       store.prefs.minutes = Number.isInteger(v) ? v : NaN;
       save(); render(); return;
     }
+    const xpref = el.dataset && el.dataset.xpref;
+    if (xpref) { // exam setup radios
+      const xp = store.examPrefs;
+      if (xpref === 'timerOn') xp.timerOn = el.value === 'on'; else xp[xpref] = el.value;
+      save(); render(); return;
+    }
+    if (el.dataset && el.dataset.pick) { // topic-based exam: add/remove a question group (keeps pick order)
+      const xp = store.examPrefs;
+      const pid = el.dataset.pick;
+      xp.picked = xp.picked.filter((x) => x !== pid);
+      if (el.checked) xp.picked.push(pid);
+      save(); refreshPicker(); return;
+    }
     const pref = el.dataset && el.dataset.pref;
     if (pref) { // home-page dropdown options
       const p = store.prefs;
@@ -1276,7 +1760,8 @@
     }
     const qid = el.dataset && el.dataset.qid;
     if (!qid || el.tagName === 'TEXTAREA') return;
-    const s = store.session;
+    const s = cur();
+    if (!s || locked(s)) return;
     const q = QMAP[qid];
     const i = Number(el.value);
     if (q.type === 'single_choice') s.answers[qid] = i;
@@ -1298,8 +1783,20 @@
       store.prefs.minutes = el.value !== '' && Number.isInteger(v) ? v : NaN;
       save(); render(); return;
     }
+    if (el.id === 'exam-min') {
+      const v = Number(el.value);
+      store.examPrefs.minutes = el.value !== '' && Number.isInteger(v) ? v : NaN;
+      save(); render(); return;
+    }
+    if (el.id === 'exam-search') { // update only the list, so typing keeps focus and the selection panel stays put
+      ui.examQuery = el.value;
+      const list = document.getElementById('pick-list');
+      if (list) list.innerHTML = pickListHTML();
+      return;
+    }
     if (el.tagName !== 'TEXTAREA' || !el.dataset.qid) return;
-    const s = store.session;
+    const s = cur();
+    if (!s || locked(s)) return;
     const qid = el.dataset.qid;
     const hadState = !!s.checked[qid] || !hasAnswer(s, qid) !== !el.value.trim();
     s.answers[qid] = el.value;
@@ -1325,13 +1822,13 @@
     const tag = e.target.tagName;
     if (tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT' || e.target.isContentEditable || e.target.closest('.CodeMirror')) return;
     const cell = e.target.closest('.nav-cell');
+    const s = cur();
     if (cell && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)) {
       moveInGrid(cell, e.key); e.preventDefault(); return;
     }
-    const s = store.session;
     if (e.key === 'ArrowRight') { if (s.index < s.groups.length - 1) go(s.index + 1); e.preventDefault(); }
     else if (e.key === 'ArrowLeft') { if (s.index > 0) go(s.index - 1); e.preventDefault(); }
-    else if (e.key === 'm' || e.key === 'M') {
+    else if ((e.key === 'm' || e.key === 'M') && !locked(s)) {
       const pid = curGroup().pid;
       if (s.marked[pid]) delete s.marked[pid]; else s.marked[pid] = true;
       save(); render();
@@ -1348,5 +1845,12 @@
   });
   window.addEventListener('beforeunload', save);
 
+  // An exam that was never explicitly left (refresh, crash, closed tab) reopens straight into the exam,
+  // with its clock having kept running; one whose time ran out meanwhile is submitted as of expiry.
+  if (store.exam) {
+    const t = store.exam.timer;
+    if (t && t.runningSince && timeLeft(t) <= 0) submitExam(true);
+    else if (!store.exam.leftAt) { setView('exam'); ui.screen = 'practice'; }
+  }
   render();
 })();

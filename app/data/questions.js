@@ -30,9 +30,11 @@ window.CS61A_BANK = (function () {
     { id: 'scheme', name: 'Scheme', blurb: 'Coming soon' },
   ];
 
+  // complete: every question of the original PDF is transcribed (checked: both total 50 points).
+  // Set it to false for a partial transcription; Exam Mode then labels the full exam as incomplete.
   const EXAMS = {
-    fa25: { id: 'fa25', label: 'Fall 2025 Midterm 2', url: 'https://cs61a.org/resources/' },
-    sp25: { id: 'sp25', label: 'Spring 2025 Midterm 2', url: 'https://cs61a.org/resources/' },
+    fa25: { id: 'fa25', label: 'Fall 2025 Midterm 2', url: 'https://cs61a.org/resources/', complete: true },
+    sp25: { id: 'sp25', label: 'Spring 2025 Midterm 2', url: 'https://cs61a.org/resources/', complete: true },
   };
 
   const BUBBLE_NOTE = 'For questions with circular bubbles, select exactly one choice. For questions with square checkboxes, you may select multiple choices.';
