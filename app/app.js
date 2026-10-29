@@ -123,6 +123,19 @@
     const key = ANSWER_KEY[q.id];
     return !!(key && key.accepted && key.accepted.some((x) => norm(x) === norm(a)));
   }
+  // Answer elimination: a visual study aid kept per part in s.eliminated[qid] = [choice indices].
+  // Never read by grading. Lives on the session, so a new session starts clean and resuming restores it.
+  const letter = (i) => String.fromCharCode(65 + i);
+  function eliminated(s, qid) {
+    return (s.eliminated && s.eliminated[qid]) || [];
+  }
+  function setEliminated(s, qid, i, on) {
+    const list = eliminated(s, qid).filter((x) => x !== i);
+    if (on) list.push(i);
+    if (!s.eliminated) s.eliminated = {};
+    if (list.length) s.eliminated[qid] = list.sort((x, y) => x - y);
+    else delete s.eliminated[qid];
+  }
   // Final status used by the navigator & results: correct | incorrect | ungraded | skipped
   function statusOf(s, id) {
     const q = QMAP[id];
@@ -617,7 +630,7 @@
   function newSession(ids, title) {
     const p = store.prefs;
     const timer = p.timerOn ? { durationMs: p.minutes * 60000, remainingMs: p.minutes * 60000, runningSince: Date.now(), expired: false } : null;
-    store.session = { ids, groups: groupIds(ids), index: 0, title, answers: {}, checked: {}, revealed: {}, selfGrade: {}, marked: {}, timer, startedAt: Date.now(), finishedAt: null, finished: false };
+    store.session = { ids, groups: groupIds(ids), index: 0, title, answers: {}, checked: {}, revealed: {}, selfGrade: {}, marked: {}, eliminated: {}, timer, startedAt: Date.now(), finishedAt: null, finished: false };
     ui.screen = 'practice';
     ui.navOpen = false;
     ui.confirmReveal = null;
@@ -816,8 +829,10 @@
     const checked = s.checked[q.id];
     const multi = q.type === 'multi_select';
     const correctSet = new Set(multi ? key.correct : [key.correct]);
+    const elim = eliminated(s, q.id);
     const items = q.choices.map((c, i) => {
       const selected = multi ? (a || []).includes(i) : a === i;
+      const out = elim.includes(i);
       let cls = '';
       if (revealed) {
         if (correctSet.has(i)) cls = selected || !multi ? 'correct' : 'missed';
@@ -826,9 +841,12 @@
         cls = correctSet.has(i) ? 'correct' : 'wrong';
       }
       const id = `c-${q.id}-${i}`;
-      return `<li><label class="choice ${cls}" for="${id}">
+      // The eliminate button sits beside the label (not inside it), so clicking it never selects the choice.
+      const elimBtn = `<button type="button" class="elim-btn${out ? ' undo' : ''}" id="x-${q.id}-${i}" data-action="eliminate" data-i="${i}"
+          aria-label="${out ? 'Undo elimination of' : 'Eliminate'} option ${letter(i)}" title="${out ? 'Undo elimination' : `Eliminate option ${letter(i)}`}">${out ? 'Undo' : `<span class="elim-mark" aria-hidden="true">${letter(i)}</span>`}</button>`;
+      return `<li><label class="choice ${cls}${out ? ' eliminated' : ''}" for="${id}">
         <input type="${multi ? 'checkbox' : 'radio'}" id="${id}" name="${q.id}" value="${i}" data-qid="${q.id}" ${selected ? 'checked' : ''} ${revealed ? 'disabled' : ''}>
-        <span class="txt">${esc(c)}</span></label></li>`;
+        <span class="txt">${esc(c)}</span>${out ? '<span class="sr-only"> (eliminated)</span>' : ''}</label>${elimBtn}</li>`;
     }).join('');
     return `<ul class="choices ${q.mono ? 'mono' : ''}" role="${multi ? 'group' : 'radiogroup'}" aria-label="Answer choices for part ${esc(q.label)}">${items}</ul>`;
   }
@@ -1142,6 +1160,13 @@
       case 'reveal-no': ui.confirmReveal = null; break;
       case 'reveal-yes': s.revealed[q.id] = true; ui.confirmReveal = null; announce('Solution shown.'); break;
       case 'self': s.selfGrade[q.id] = btn.dataset.v; break;
+      case 'eliminate': {
+        const i = Number(btn.dataset.i);
+        const on = !eliminated(s, q.id).includes(i);
+        setEliminated(s, q.id, i, on);
+        announce(`Option ${letter(i)} ${on ? 'eliminated' : 'restored'}.`);
+        break;
+      }
       case 'pause': pauseTimer(s.timer); break;
       case 'resume-timer': if (s.timer.remainingMs > 0) s.timer.runningSince = Date.now(); break;
       case 'reset-timer':
@@ -1230,6 +1255,7 @@
       if (el.checked) cur.add(i); else cur.delete(i);
       s.answers[qid] = Array.from(cur).sort((x, y) => x - y);
     }
+    if (el.checked) setEliminated(s, qid, i, false); // choosing an eliminated option un-eliminates it
     delete s.checked[qid];
     save();
     render(); // also refreshes the linked code blank

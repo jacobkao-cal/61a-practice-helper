@@ -219,6 +219,20 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line-st
 .choice.wrong .txt::after { content: "  ✗ your choice"; font-family: var(--sans); font-size: 12px; color: var(--bad); font-weight: 700; white-space: nowrap; }
 .choice.missed .txt::after { content: "  ← also correct"; font-family: var(--sans); font-size: 12px; color: var(--good); font-weight: 700; }
 
+/* Answer elimination (Digital SAT style): struck-through letter bubble on the right; "Undo" once eliminated */
+.choices li { display: flex; align-items: flex-start; gap: 8px; }
+.choices li .choice { flex: 1; min-width: 0; }
+.elim-btn { flex: 0 0 auto; min-width: 44px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border: 0; background: none; padding: 0 4px; border-radius: 4px; color: var(--ink); font-family: var(--sans); }
+.elim-mark { position: relative; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border: 1.5px solid currentColor; border-radius: 50%; font-size: 11px; font-weight: 700; line-height: 1; }
+.elim-mark::after { content: ""; position: absolute; left: -4px; right: -4px; top: 50%; height: 1.5px; margin-top: -0.75px; background: currentColor; }
+.elim-btn:hover { background: #f0f1f3; }
+.elim-btn:hover .elim-mark { background: var(--paper); }
+.elim-btn.undo { font-size: 13px; font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
+.elim-btn:focus-visible { outline: 3px solid var(--accent-2); outline-offset: 1px; }
+.choice.eliminated .txt { text-decoration: line-through; text-decoration-thickness: 1.5px; color: var(--line-strong); }
+.choice.eliminated input { border-color: var(--line-strong); }
+.choice.eliminated .txt::after { display: inline-block; white-space: pre; text-decoration: none; } /* keep grading tags readable */
+
 /* Exam-style answer box */
 .answer-box { border: 1px solid #777; background: var(--paper); margin: 4px 0 18px 22px; }
 .answer-box textarea { display: block; width: 100%; min-height: 64px; border: 0; resize: vertical; padding: 10px 12px; font-family: var(--mono); font-size: 14px; background: transparent; }
