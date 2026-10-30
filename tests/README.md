@@ -23,8 +23,9 @@ to test a served copy. `npm run test:guides` needs `python3`.
 | `session_isolation` | annotations / code / answers scoped to each practice set |
 | `phase5a_qa` | damaged saved data, grading audit, Go to Home, two open tabs, Phase 6 readiness |
 | `phase6a_runner` | Run Code: output, errors, timeout + recovery, isolation, stale results, review safety (needs internet for Pyodide) |
-| `phase6c_test_bank` | The 15 shipped suites in Pyodide (official passes, a wrong answer is caught); real Practice/Exam/Review flow |
+| `phase6c_test_bank` | The 28 shipped suites in Pyodide (official passes, a wrong answer is caught); real Practice/Exam/Review flow |
 | `phase6b_tests` | Verified tests (fixture suites, test-only): Passed X/Y, per-case details, not-run cases, case timeout, isolation, unverified suites ignored, exam/review safety |
+| `phase8_2024_exams` | Fall 2024 / Spring 2024 Midterm 2: structure and points vs the PDFs, full exams in order, official answers score 45/45 and 50/50, A+ staff-graded, history unchanged, topic practice, diagram image, saved-filter migration, Run Code suite |
 | `study_guides_doctest` | every study-guide example runs and prints what it shows |
 | `verify_test_bank` | every verified suite passes with the official solution and all accepted answers, and fails for every wrong choice and listed wrong answer (local Python, same harness as the browser) |
 

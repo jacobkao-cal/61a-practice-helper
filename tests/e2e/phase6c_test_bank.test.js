@@ -64,7 +64,7 @@ const officialAnswers = (pids) => Object.fromEntries(pids.flatMap((pid) => parts
 
   // ── every shipped suite, in the browser's Python ──
   await page.goto(APP_URL);
-  ok(await page.evaluate(() => window.CS61A_TEST_SUITES.suites.length) === 15, 'the app ships 15 verified suites');
+  ok(await page.evaluate(() => window.CS61A_TEST_SUITES.suites.length) === 28, 'the app ships 28 verified suites');
   for (const t of SUITES) {
     const tests = { setup: t.setup || '', cases: t.cases.map((c) => ({ input: c.input, origin: c.origin })) };
     const good = await page.evaluate((code, tests) => window.CS61A_RUNNER.run(code, { tests }), fill(t.problem), tests);

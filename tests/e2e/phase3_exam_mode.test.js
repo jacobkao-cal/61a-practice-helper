@@ -53,7 +53,9 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   ok(await has('.exam-setup') && !(await has('[data-action="start"]')), 'Exam Mode shows exam setup instead of practice setup');
   ok(await has('#exam-kind-full:checked'), 'full past exam selected by default');
   const fullRows = await page.$$eval('.kind-list .kind-opt', (ls) => ls.map((l) => l.textContent.replace(/\s+/g, ' ').trim()));
-  ok(fullRows.length === 2 && fullRows.every((r) => /50 points/.test(r) && /Complete/.test(r)), `both exams listed with 50 points + Complete tag`);
+  const fullPts = { fa25: 50, sp25: 50, fa24: 45, sp24: 50 }; // the totals printed in each exam PDF
+  ok(fullRows.length === 4 && Object.values(B.EXAMS).every((e, i) => fullRows[i].startsWith(e.label) && new RegExp(`${fullPts[e.id]} points`).test(fullRows[i]) && /Complete/.test(fullRows[i])),
+    `all four exams listed with their PDF point totals + Complete tag`);
   await click('#exam-id-sp25');
   await click('#exam-timer-off');
   ok(await page.$eval('#exam-min', (i) => i.disabled), 'untimed disables minutes');
@@ -207,7 +209,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   await click('#exam-kind-custom');
   ok(await has('#pick-list') && await page.$eval('[data-action="start-exam"]', (b) => b.disabled), 'topic-based: picker shown, Start disabled with nothing selected');
   const allRows = await page.$$eval('#pick-list .pick-name', (ns) => ns.map((n) => n.textContent));
-  ok(allRows.filter((r) => r.startsWith('What Would Python Display?')).length === 2 && allRows.some((r) => r === 'Exclusive — Fall 2025 MT2 — Q4 — Lists & Mutation, Linked Lists, Recursion' || r.startsWith('Exclusive — Fall 2025 MT2 — Q4 —')), '15. duplicate names disambiguated by exam; "Name — Exam — Q# — Topics" format');
+  ok(allRows.filter((r) => r.startsWith('What Would Python Display?')).length === 4 && allRows.some((r) => r === 'Exclusive — Fall 2025 MT2 — Q4 — Lists & Mutation, Linked Lists, Recursion' || r.startsWith('Exclusive — Fall 2025 MT2 — Q4 —')), '15. duplicate names disambiguated by exam; "Name — Exam — Q# — Topics" format');
   await click('#xt-trees');
   const treeRows = await page.$$eval('#pick-list [data-pick]', (cs) => cs.map((c) => c.dataset.pick));
   const treeExpect = Object.keys(B.PROBLEMS).filter((pid) => parts(pid).some((q) => q.topics.includes('trees')));

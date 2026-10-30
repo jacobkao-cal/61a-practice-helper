@@ -144,6 +144,14 @@
     const a = store.attempts.find((x) => x.id === id);
     if (!a || !w || w.reviewOf !== id || !w.answers || typeof w.answers !== 'object' || !Array.isArray(w.groups)) delete store.reviews[id];
   });
+  // Exams added to the bank later: a saved practice filter that had every exam of its time selected (the
+  // "all midterms" default) also gets the new ones; a filter narrowed on purpose is left as it was.
+  // prefs.examsKnown records the exams that existed when the filter was saved (absent before Fall/Spring 2024).
+  const knownExams = Array.isArray(saved && saved.prefs && saved.prefs.examsKnown) ? saved.prefs.examsKnown : ['fa25', 'sp25'];
+  if (knownExams.every((id) => !EXAMS[id] || store.prefs.exams.includes(id))) {
+    store.prefs.exams = Object.keys(EXAMS).filter((id) => store.prefs.exams.includes(id) || !knownExams.includes(id));
+  }
+  store.prefs.examsKnown = Object.keys(EXAMS);
   if (!EXAMS[store.examPrefs.examId]) store.examPrefs.examId = DEFAULT_EXAM_PREFS.examId;
   if (!SIZES.includes(store.prefs.size)) store.prefs.size = DEFAULT_PREFS.size;
   if (!['practice', 'exam'].includes(store.prefs.mode)) store.prefs.mode = 'practice';
@@ -1028,7 +1036,7 @@
       ${mode === 'exam' ? renderExamSetup() + renderHistory() : `<section class="setup-card" aria-label="Practice setup">
         <div class="dd-row">
           ${dropdown('topics', 'Topics', p.topics.length ? summarize(p.topics, TOPICS.map((t) => t.id), topicName, 'All topics') : 'All topics', topicsBody, true)}
-          ${dropdown('exams', 'Exams', summarize(p.exams, Object.keys(EXAMS), (id) => EXAMS[id].label, 'Both midterms'), examsBody)}
+          ${dropdown('exams', 'Exams', summarize(p.exams, Object.keys(EXAMS), (id) => EXAMS[id].label, 'All midterms'), examsBody)}
           ${dropdown('difficulties', 'Difficulty', summarize(p.difficulties, DIFFS, cap, 'Any'), diffBody)}
           ${dropdown('types', 'Question types', summarize(p.types, TYPES, typeName, 'All types'), typesBody)}
           ${dropdown('size', 'Set size', p.size === 'all' ? 'All' : `${p.size} questions`, sizeBody)}
@@ -1041,7 +1049,7 @@
       </section>`}
 
       <div class="notice">No account needed. Your answers, code notes and annotations are saved in <b>this browser on this device</b> and are gone if you clear site data.</div>
-      <p class="disclaimer">Independent student project, not an official UC Berkeley / CS 61A service. Questions and answers are transcribed from CS 61A Fall 2025 and Spring 2025 Midterm 2 and credited on each question. Explanations were written for this prototype and are not official.</p>
+      <p class="disclaimer">Independent student project, not an official UC Berkeley / CS 61A service. Questions and answers are transcribed from CS 61A Midterm 2 (Fall 2025, Spring 2025, Fall 2024 and Spring 2024) and credited on each question. Explanations were written for this prototype and are not official.</p>
     </main>`;
   }
 
@@ -1208,6 +1216,7 @@
         <div class="src"><span>Source: <a href="${esc(ex.url)}" target="_blank" rel="noopener">${esc(ex.label)}</a>, Q${esc(pr.number)}</span>${topics}</div>
         <h2>${esc(pr.number)}. <span class="pts">(${pr.points.toFixed(1)} points)</span>${esc(pr.title)}</h2>
         <div class="annot-text" data-annot="intro"></div>
+        ${pr.figure ? `<figure class="exam-figure"><img src="${esc(pr.figure.src)}" width="${esc(pr.figure.width)}" height="${esc(pr.figure.height)}" alt="${esc(pr.figure.alt)}" draggable="false"><figcaption>Diagram from the exam PDF</figcaption></figure>` : ''}
         <div class="editor">
           <div class="editor-head">
             <span class="editor-file">${esc(fileName(g.pid))}</span>

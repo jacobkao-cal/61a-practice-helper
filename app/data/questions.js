@@ -1,7 +1,7 @@
 // Question bank for the CS 61A practice prototype.
 //
-// Content source: CS 61A Fall 2025 Midterm 2 and Spring 2025 Midterm 2 (exam + official solutions),
-// transcribed for a personal/prototype build. Verify course-material permissions before publishing.
+// Content source: CS 61A Fall 2025, Spring 2025, Fall 2024 and Spring 2024 Midterm 2 (exam + official
+// solutions), transcribed for a personal/prototype build. Verify course-material permissions before publishing.
 //
 // Shape:
 //   TOPICS    – configurable category list (order = display order on the home page)
@@ -11,6 +11,7 @@
 //
 // Inline text markup (rendered safely by app.js): `code`, **bold**, *italic*.
 // Code blanks: ⟦a⟧ renders as an exam-style blank labeled (a).
+// figure (optional): an image from the exam PDF shown under the intro, { src, alt, width, height }.
 
 window.CS61A_BANK = (function () {
   const code = (s) => s.replace(/^\n/, '').replace(/\s+$/, '');
@@ -30,11 +31,14 @@ window.CS61A_BANK = (function () {
     { id: 'scheme', name: 'Scheme', blurb: 'Coming soon' },
   ];
 
-  // complete: every question of the original PDF is transcribed (checked: both total 50 points).
+  // complete: every question of the original PDF is transcribed (checked against the PDFs' point values:
+  // Fall 2025, Spring 2025 and Spring 2024 total 50 points; Fall 2024 totals 45).
   // Set it to false for a partial transcription; Exam Mode then labels the full exam as incomplete.
   const EXAMS = {
     fa25: { id: 'fa25', label: 'Fall 2025 Midterm 2', url: 'https://cs61a.org/resources/', complete: true },
     sp25: { id: 'sp25', label: 'Spring 2025 Midterm 2', url: 'https://cs61a.org/resources/', complete: true },
+    fa24: { id: 'fa24', label: 'Fall 2024 Midterm 2', url: 'https://cs61a.org/resources/', complete: true },
+    sp24: { id: 'sp24', label: 'Spring 2024 Midterm 2', url: 'https://cs61a.org/resources/', complete: true },
   };
 
   const BUBBLE_NOTE = 'For questions with circular bubbles, select exactly one choice. For questions with square checkboxes, you may select multiple choices.';
@@ -564,6 +568,472 @@ def close_exp(s, x):
             return candidate
 `),
     },
+
+    // ───────────────────────────── Fall 2024 Midterm 2 ─────────────────────────────
+    'fa24-1': {
+      exam: 'fa24', number: '1', title: 'What Would Python Display?', points: 5,
+      intro: 'Assume the following code has been executed. The `Tree` class appears on the midterm 2 study guide (page 2, left side).',
+      code: code(`
+scare = Tree(0, [Tree(4), Tree(5, [Tree(10)]), Tree(2)])
+crow = Tree(9, [scare, Tree(7, [Tree(6)])])
+
+def climb(t, f):
+    if t.is_leaf():
+        return [t.label]
+    return [t.label] + climb(max(t.branches, key=f), f)
+
+def run(t):
+    if t.is_leaf():
+        return t.label
+    else:
+        return max(map(run, t.branches))
+
+def hide(t):
+    return t.label
+
+jump = {(2 * x - 1): x for x in range(50)}
+`),
+      outro: 'Write the value of each expression below or *Error* if an error occurs.',
+    },
+    'fa24-2': {
+      exam: 'fa24', number: '2', title: 'Pizza by the Slice', points: 5,
+      intro: 'Answer the questions about the code below. You are encouraged to draw an environment diagram, but the diagram itself will not be scored.',
+      figure: { src: 'assets/fa24-mt2-q2.png', width: 683, height: 216, alt: 'From the exam: the code with line numbers 1 to 12, and a blank environment diagram. The Global frame binds slice_up to func slice_up(s) [parent=Global] and has one more blank binding. Frame f1: slice_up [parent=Global] has three blank bindings and a blank Return value.' },
+      code: code(`
+def slice_up(s):
+    copy = s
+    t = [copy]
+    while len(s) > 1:
+        t.append(s[:len(s)-1])
+        s.pop()
+        s[0] = len(s)
+    return t
+
+t = [3, 4, 5]
+print(slice_up(t))
+print(t)
+`),
+      lineNumbers: true,
+    },
+    'fa24-3': {
+      exam: 'fa24', number: '3', title: 'CS 61A Software Store', points: 6,
+      intro: 'A `Store` instance has a list of `branches`, and each branch is also a `Store` instance, forming a tree of stores. Each `Store` instance also has a list of programs (strings) called its `inventory`. For a `Store`:\n\n• The `copies(s)` method returns the number of times `s` appears in the inventories of all nodes in its tree of stores.\n\n• The `add_to(k)` method returns a function that takes a string and appends it to the `inventory` of its `k`th branch. Assume that `k` is non-negative and less than the number of branches.',
+      code: code(`
+class Store:
+    """A Store selling programs has branches forming a tree of Stores.
+    >>> north, south = Store(['Cats', 'Ants']), Store(['Cats', 'Cats', 'Hog'])
+    >>> east, west = Store(['Cats', 'Hog', 'Hog'], [north, south]), Store(['Cats', 'Cats', 'Ants'])
+    >>> main = Store(['Ants', 'Ants', 'Hog'], [east, west])
+    >>> east.copies('Cats')  # 1 in north, 2 in south, 1 in east
+    4
+    >>> main.copies('Ants')  # 2 in main, 1 in north, 1 in west
+    4
+    >>> main.add_to(1)('Ants') # Add 'Ants' to the inventory of west, the branch of main at index 1
+    >>> [main.copies('Ants'), west.copies('Ants')]  # increased copies in both main and west
+    [5, 2]
+    """
+    def __init__(self, programs, branches=[]):
+        assert all([isinstance(b, Store) for b in branches])
+        self.branches = branches
+        self.inventory = programs
+
+    def copies(self, s):
+        """Return the number of times s (string) appears in all inventories of this tree."""
+        return sum([⟦a⟧ for p in self.inventory if p == s] + [⟦b⟧ for b in self.branches])
+
+    def add_to(self, k):
+        """Return a function that appends a string to the inventory of the branch at index k."""
+        return ⟦c⟧
+`),
+    },
+    'fa24-4a': {
+      exam: 'fa24', number: '4(a)', title: 'Almost a Perfect Question — semiperfect', points: 6,
+      intro: '**Definition.** A *proper divisor* of an integer `n` is an integer `d` less than `n` that evenly divides `n`, and so `n` divided by `d` has no remainder. A *semiperfect* number is a positive integer that is the sum of some (or all) of its proper divisors. For example, 24 = 2 + 4 + 6 + 12 and so it is semiperfect. The sum of divisors cannot contain repeated numbers.\n\nImplement `semiperfect`, which takes a positive integer `n`. It returns `True` if `n` is semiperfect and `False` otherwise.',
+      code: code(`
+def semiperfect(n):
+    """Return whether positive integer n is a sum of some (or all) of its proper divisors.
+    >>> [k for k in range(1, 40) if semiperfect(k)]
+    [6, 12, 18, 20, 24, 28, 30, 36]
+    """
+    def f(s, d):
+        if ⟦a⟧:
+            return True
+        if d >= n:
+            return False
+        if ⟦b⟧ and f(⟦c⟧, d + 1):
+            return True
+        return ⟦d⟧
+    return f(n, 1)
+`),
+    },
+    'fa24-4b': {
+      exam: 'fa24', number: '4(b)', title: 'Almost a Perfect Question — subsums', points: 6,
+      intro: 'Implement `subsums`, a generator function that takes a list of **unique** (no repeats) positive integers `s` and a positive integer `n`. It yields all sublists of `s` that sum to `n`. A sublist of `s` is a list containing some of the elements of `s` in order. The `subsums` function should not yield the same list twice. The lists may appear in any order.',
+      code: code(`
+def subsums(s, n):
+    """Yield all sublists of s that sum to n.
+    >>> list(subsums([1, 2, 3, 6, 9], 18))
+    [[1, 2, 6, 9], [3, 6, 9]]
+    >>> list(subsums([1, 2, 3, 4, 6], 16))
+    [[1, 2, 3, 4, 6]]
+    >>> list(subsums([1, 2, 3, 4, 6, 8, 12], 12))
+    [[1, 2, 3, 6], [1, 3, 8], [2, 4, 6], [4, 8], [12]]
+    """
+    if s:
+        if ⟦e⟧:
+            yield [n]
+        for t in ⟦f⟧:
+            yield ⟦g⟧
+        yield from ⟦h⟧
+`),
+    },
+    'fa24-4c': {
+      exam: 'fa24', number: '4(c)', title: 'Almost a Perfect Question — semisums', points: 6,
+      intro: '**Definition.** A *proper divisor* of an integer `n` is an integer `d` less than `n` that evenly divides `n`, and so `n` divided by `d` has no remainder. A *semiperfect* number is a positive integer that is the sum of some (or all) of its proper divisors. For example, 24 = 2 + 4 + 6 + 12 and so it is semiperfect. The sum of divisors cannot contain repeated numbers.\n\nImplement `semisums`, which takes a positive integer `n`. It returns a list of all lists of unique (no repeats) proper divisors of `n` that sum to `n`. You may call `semiperfect` and `subsums`.',
+      code: code(`
+def semisums(n):
+    """Return a list of all lists (with no repeats) of
+    proper divisors of n that sum to n.
+
+    >>> semisums(22)  # 22 is not semiperfect, so there are no sums.
+    []
+    >>> semisums(30)  # 30 is semiperfect. It has three different sums.
+    [[1, 3, 5, 6, 15], [2, 3, 10, 15], [5, 10, 15]]
+    """
+    return list(⟦i⟧([k for k in range(1, n) if ⟦j⟧], ⟦k⟧))
+
+def primitive_semiperfect(n):
+    """Return whether n is semiperfect and has no semiperfect proper divisors.
+
+    >>> [k for k in range(1, 300) if primitive_semiperfect(k)]
+    [6, 20, 28, 88, 104, 272]
+    """
+    return semiperfect(n) and not any(map(semiperfect, filter(⟦l⟧)))
+`),
+    },
+    'fa24-5a': {
+      exam: 'fa24', number: '5(a)', title: 'How Long is this Exam? — longer', points: 5,
+      intro: 'Implement `longer`, which takes two linked lists of numbers `s` and `t`. It returns the longer of the two. If they have the same length, it returns `s`.\n\nA linked list is either a `Link` instance or `Link.empty`. The `Link` class is on page 2 of the midterm 2 study guide.',
+      code: code(`
+def longer(s, t):
+    """Return the longer linked list, s or t. (Same length? return s.)
+
+    >>> longer(Link(2, Link(3)), Link.empty)
+    Link(2, Link(3))
+    >>> longer(Link(2, Link(3)), Link(4, Link(5)))
+    Link(2, Link(3))
+    >>> longer(Link(2, Link(3)), Link(4, Link(5, Link(6, Link(7)))))
+    Link(4, Link(5, Link(6, Link(7))))
+    >>> longer(Link.empty, Link.empty) is Link.empty
+    True
+    """
+    a, b = s, t
+
+    while b is not Link.empty:
+
+        if ⟦a⟧:
+
+            return ⟦b⟧
+
+        ⟦c⟧
+
+    return ⟦d⟧
+`),
+    },
+    'fa24-5b': {
+      exam: 'fa24', number: '5(b)', title: 'How Long is this Exam? — longest', points: 6,
+      intro: 'Implement `longest`, which takes a linked list of postive integers `s` and a positive integer `n`. It returns the longest sublist of `s` with elements that sum to a number less than or equal to `n`. **Do not mutate `s`.** In case of a tie, return any of the longest sublists whose sum is `n` or less. Assume `longer` is implemented correctly.\n\nA sublist of a linked list `s` is a linked list with some (or none or all) of the elements of `s` in order.\n\nAssume the sum of the elements of `Link.empty` is 0. `Link.empty` is a sublist of any linked list.',
+      code: code(`
+def longest(s, n):
+    """Return the longest sublist of s that sums to n or less.
+
+    >>> longest(Link(5, Link(1, Link(3, Link(4, Link(2, Link(7)))))), 7)
+    Link(1, Link(3, Link(2)))
+    >>> longest(Link(5, Link(1, Link(3, Link(4, Link(2, Link(7)))))), 70)
+    Link(5, Link(1, Link(3, Link(4, Link(2, Link(7))))))
+    >>> longest(Link(3, Link(4, Link(5))), 2) is Link.empty
+    True
+    """
+    if s is Link.empty:
+        return s
+
+    t = ⟦e⟧
+
+    if ⟦f⟧:
+
+        return longer(⟦g⟧, t)
+    else:
+        return t
+`),
+    },
+    'fa24-6': {
+      exam: 'fa24', number: '6', title: 'Nice Path! — A+ question', points: 0,
+      intro: '**This A+ question is not worth any points. It can only affect your course grade if you have a high A and might receive an A+. Finish the rest of the exam first!**\n\nFill in the blank of `max_path`, which takes a Tree of integers `t` and a function `g`. It returns a list `s` containing the labels along the path from the root of `t` to a leaf for which `g(s)` is as large or larger than for any other path. In case of a tie, return any path with a maximum `g(s)` value.',
+      code: code(`
+def climb(t, f):
+    if t.is_leaf():
+        return [t.label]
+    return [t.label] + climb(max(t.branches, key=f), f)
+
+def max_path(t, g):
+    """Return the path s from the root of t to a leaf for which g(s) is largest.
+
+    >>> scare = Tree(0, [Tree(4), Tree(5, [Tree(10)]), Tree(2)])
+    >>> crow = Tree(4, [Tree(5), Tree(9, [scare, Tree(7, [Tree(6)])]), Tree(8)])
+    >>> max_path(crow, lambda p: -p[-1])             # The path to the smallest leaf
+    [4, 9, 0, 2]
+    >>> max_path(crow, len)                          # The longest path
+    [4, 9, 0, 5, 10]
+    >>> max_path(crow, lambda p: -abs(p[0]-p[-1]))  # To the leaf closest in value to the root
+    [4, 9, 0, 4]
+    """
+
+    x = [t.label]  # You can use x instead of [t.label] to shorten your answer!
+
+    return climb(t, lambda b: ⟦A+⟧)
+`),
+    },
+
+    // ───────────────────────────── Spring 2024 Midterm 2 ─────────────────────────────
+    'sp24-1': {
+      exam: 'sp24', number: '1', title: 'What Would Python Display?', points: 7,
+      intro: 'Assume the following code has been executed. The `Link` class appears on the midterm 2 study guide (page 2, left side).',
+      code: code(`
+def shake(it):
+    if it is not Link.empty and it.rest is not Link.empty:
+        if it.first + 1 < it.rest.first:
+            it.rest = Link(it.rest.first-1, it.rest)
+            shake(it)
+        else:
+            shake(it.rest)
+it = Link(2, Link(5, Link(7)))
+off = Link(1, it.rest)
+shake(it)
+
+def cruel(summer):
+    while summer is not Link.empty:
+        yield summer.first
+        summer = summer.rest
+        if summer is not Link.empty:
+            summer = summer.rest
+summer = Link(1, Link(2, Link(3, Link(4))))
+`),
+      outro: 'Write the output printed for each expression below or *Error* if an error occurs.',
+    },
+    'sp24-2': {
+      exam: 'sp24', number: '2', title: 'Spin Cycle', points: 6,
+      intro: 'Complete the environment diagram below and then answer the questions that follow. Do not add frames for calls to built-in functions (such as `print`).',
+      figure: { src: 'assets/sp24-mt2-q2.png', width: 663, height: 251, alt: 'From the exam: the code with line numbers 1 to 13, and an environment diagram to complete. The Global frame binds cycle to func cycle(a) [parent=Global] and has a blank binding for c. Frame f1: cycle [parent=Global] has blank bindings for a and b, binds f to func f(rest) [parent=f1], and shows Return value None. Frame f2: f [parent=f1] has a blank binding for rest and a blank Return value.' },
+      code: code(`
+def cycle(a):
+    def f(rest):
+        rest.append(a.pop())
+        return [rest.append(a)]
+    b = []
+    a = f(b)
+    b = b + [5]
+    print(a)
+    print(b)
+
+c = [2, 3, 4]
+cycle(c)
+print(c)
+`),
+      lineNumbers: true,
+    },
+    'sp24-3': {
+      exam: 'sp24', number: '3', title: 'Fearless', points: 8,
+      intro: 'If you sing lyrics into a mic, every connected speaker repeats them.\n\nA `Mic` instance has a dictionary `speakers` containing `Speaker` instances as values, each with its location (`str`) as its key. Its `sing` method takes a string `lyrics` and invokes the `repeat` method of each `Speaker` instance connected to it.\n\nA `Speaker` takes a `transform` function that takes and returns a string. To `connect` a `Speaker` instance to `m` (`Mic`) in a `location` (`str`), add that instance to the `speakers` dictionary of `m` in that `location`. To `repeat` a signal `s` (`str`), return the result of calling the speaker’s `transform` function on `s`.\n\nEvery `Mic` starts connected to a `Speaker` in the `Front` location that repeats the exact same signal it receives.\n\nImplement the `Mic` and `Speaker` classes to match the doctests. The `str.lower` and `str.upper` functions return lowercased and uppercased versions of a string, respectively.',
+      code: code(`
+class Mic:
+    """A microphone connected to speakers.
+
+    >>> m = Mic()  # Front is connected automatically
+    >>> m.sing('Is this thing on?')
+    Front - Is this thing on?
+    >>> Speaker(str.lower).connect(m, 'Left Side')
+    >>> Speaker(str.upper).connect(m, 'Right Side')
+    >>> m.sing("You belong with me.")
+    Front - You belong with me.
+    Left Side - you belong with me.
+    Right Side - YOU BELONG WITH ME.
+    """
+    def __init__(self):
+        self.speakers = ⟦a⟧
+
+    def sing(self, lyrics):
+        for k in self.speakers.keys():  # iterate over the keys of a dictionary
+            print(k, '-', ⟦b⟧.repeat(lyrics))
+
+class Speaker:
+    def __init__(self, transform):
+        self.transform = transform
+
+    def connect(self, m, location):
+        ⟦c⟧
+
+    def repeat(self, s):
+        return ⟦d⟧
+`),
+    },
+    'sp24-4a': {
+      exam: 'sp24', number: '4(a)', title: 'Who’s counting? — is_strip', points: 4,
+      intro: '**Definition.** A *strip* is a list of integers in which each integer is one more than the last. For example, `[3, 4, 5, 6]` is a strip. Empty and one-element lists are strips.\n\nImplement `is_strip`, which takes a list of integers `s` and returns whether it is a strip.',
+      code: code(`
+def is_strip(s):
+    """Return whether list s is a strip.
+
+    >>> is_strip([3, 4, 5, 6])
+    True
+    >>> is_strip([3, 3, 3])        # 3 after 3
+    False
+    >>> is_strip([3, 4, 5, 4, 6])  # 4 after 5
+    False
+    >>> is_strip([3, 4, 5, 5, 6])  # 5 after 5
+    False
+    >>> is_strip([3, 4, 5, 6, 8])  # 8 after 6
+    False
+    >>> is_strip([5])
+    True
+    >>> is_strip([])
+    True
+    """
+    assert type(s) == list
+    return ⟦a⟧ or s == list(range(⟦b⟧, ⟦c⟧))
+`),
+    },
+    'sp24-4b': {
+      exam: 'sp24', number: '4(b)', title: 'Who’s counting? — drip', points: 7,
+      intro: '**Definition.** A *strip* is a list of integers in which each integer is one more than the last. For example, `[3, 4, 5, 6]` is a strip. Empty and one-element lists are strips.\n\nImplement `drip`, which takes two non-empty lists of integers `s` and `t`. It returns `True` if there is a strip containing all and only the elements of `s` and `t` **starting with `s[0]`** in which the elements of `s` appear in order and the elements of `t` appear in order. It returns `False` otherwise.',
+      code: code(`
+def drip(s, t):
+    """Return whether there is a strip made out of interleaving s and t.
+
+    >>> drip([1, 3, 5], [2, 4, 6])     # 1 2 3 4 5 6
+    True
+    >>> drip([1, 4, 5], [2, 3, 6])     # 1 2 3 4 5 6
+    True
+    >>> drip([1, 2, 3], [4, 5, 6])     # 1 2 3 4 5 6
+    True
+    >>> drip([2, 4, 5], [1, 3, 6])     # No strip starting with 2 can contain 1
+    False
+    >>> drip([1, 2, 4, 5], [1, 3, 6])  # No strip can contain 1 and 1
+    False
+    >>> drip([1, 4, 5], [2, 3, 7])     # No strip can contain 5 and 7 but no 6
+    False
+    >>> drip([1, 5, 4], [2, 3, 6])     # No strip can contain 5 before 4
+    False
+    >>> drip([2], [3, 4, 5])           # 2 3 4 5
+    True
+    >>> drip([1], [2, 3, 5])           # No strip can contain 3 and 5 but no 4
+    False
+    """
+    while s and t:
+        if s[0] + 1 == t[0]:
+            s, t = ⟦a⟧  # The next element of the strip is in t
+        elif ⟦b⟧:
+            s = s[1:]        # The next element of the strip is in s
+        else:
+            return ⟦c⟧
+    return ⟦d⟧
+`),
+    },
+    'sp24-4c': {
+      exam: 'sp24', number: '4(c)', title: 'Who’s counting? — longest', points: 6,
+      intro: '**Definition.** A *strip* is a list of integers in which each integer is one more than the last. For example, `[3, 4, 5, 6]` is a strip. Empty and one-element lists are strips.\n\nImplement `longest`, which takes a list of integers `s`. It returns the longest strip whose elements appear in `s` in order. If two such strips exist, return the one that starts earlier in `s`. **Hint:** `s[-1]` is the last element in list `s`.',
+      code: code(`
+def longest(s):
+    """Return the longest strip whose elements appear in s in order.
+    >>> longest([4, 2, 3, 5, 6, 4, 6, 5])  # 2 3 4 5 is the longest strip in s
+    [2, 3, 4, 5]
+    >>> longest([4, 2, 3, 5, 6, 4])  # 4 5 6 is as long as 2 3 4 and is earlier
+    [4, 5, 6]
+    >>> longest([2, 4, 6])
+    [2]
+    """
+    if len(s) == 0:
+        return []
+    return max([longest_with_s0(s), ⟦a⟧], key=⟦b⟧)
+
+def longest_with_s0(s):
+    """Return the longest strip in s that starts with s[0]."""
+    result = ⟦c⟧
+    for k in s[1:]:
+        if ⟦d⟧:
+            result.append(k)
+    return result
+`),
+    },
+    'sp24-4d': {
+      exam: 'sp24', number: '4(d)', title: 'Who’s counting? — has_strip', points: 5,
+      intro: '**Definition.** A *strip* is a list of integers in which each integer is one more than the last. For example, `[3, 4, 5, 6]` is a strip. Empty and one-element lists are strips.\n\nImplement `has_strip`, which takes a `Tree` of integers `t`. It returns whether there is a strip containing the labels along some path from the root to a leaf of `t`. The `Tree` class is on the midterm 2 study guide (page 2 left side).',
+      // The exam prints blank (b) as "if _______" without the colon; it is added here so the filled-in code runs.
+      code: code(`
+def has_strip(t):
+    """Return whether the elements of some root-to-leaf path form a strip.
+
+    >>> has_strip(Tree(1, [Tree(3, [Tree(4)]), Tree(2, [Tree(2), Tree(3)])]))  # 1, 2, 3
+    True
+    >>> has_strip(Tree(1, [Tree(3, [Tree(4)]), Tree(2, [Tree(2, [Tree(3)])])]))
+    False
+    >>> has_strip(Tree(1, [Tree(3, [Tree(4)]), Tree(2, [Tree(2)])]))
+    False
+    >>> has_strip(Tree(1, [Tree(2, [Tree(4)]), Tree(3, [Tree(3)])]))
+    False
+    """
+    if t.is_leaf():
+        return ⟦a⟧
+    for b in t.branches:
+        if ⟦b⟧:
+            return True
+    return ⟦c⟧
+`),
+    },
+    'sp24-4e': {
+      exam: 'sp24', number: '4(e)', title: 'Who’s counting? — strips', points: 7,
+      intro: '**Definition.** A *strip* is a list of integers in which each integer is one more than the last. For example, `[3, 4, 5, 6]` is a strip. Empty and one-element lists are strips.\n\nImplement `strips`, a generator function that takes a `Tree` of integers `t`. It yields all strips that contain the labels along a path from the root to a leaf of `t`.',
+      code: code(`
+def strips(t):
+    """Yield the paths from the root to a leaf of Tree t that form strips.
+
+    >>> list(strips(Tree(1, [Tree(3, [Tree(4)]), Tree(2, [Tree(2), Tree(3)])])))
+    [[1, 2, 3]]
+    >>> list(strips(Tree(1, [Tree(2), Tree(2, [Tree(2), Tree(3, [Tree(4)]), Tree(3)])])))
+    [[1, 2], [1, 2, 3, 4], [1, 2, 3]]
+    """
+    if t.is_leaf():
+        yield ⟦a⟧
+
+    for b in t.branches:
+        if ⟦b⟧:
+
+            for s in ⟦c⟧:
+
+                yield ⟦d⟧
+`),
+    },
+    'sp24-4aplus': {
+      exam: 'sp24', number: '4(e) v', title: 'Who’s counting? — A+ question', points: 0,
+      intro: '**This A+ question is not worth any points. It can only affect your course grade if you have a high A and might receive an A+. Finish the rest of the exam first!**\n\nFill in the blank of `only_strips`, which takes a Tree of integers `t`. It removes all nodes that are **not** on a *strip path*. A *strip path* is a path from the root to a leaf whose labels form a strip. You may use functions implemented earlier in this question.',
+      code: code(`
+def test_only_strips(t):
+    """Call only_strips(t) and then return t. Assume has_strip(t) is True.
+
+    >>> test_only_strips(Tree(1, [Tree(2), Tree(2, [Tree(2), Tree(3, [Tree(4)]), Tree(3)])]))
+    Tree(1, [Tree(2), Tree(2, [Tree(3, [Tree(4)]), Tree(3)])])
+    >>> test_only_strips(Tree(5, [Tree(6), Tree(6, [Tree(7, [Tree(9)])]), Tree(7)]))
+    Tree(5, [Tree(6)])
+    """
+    only_strips(t)
+    return t
+
+def only_strips(t):
+    """Remove all nodes of Tree t that are not on a path from the root to a leaf
+    whose labels form a strip. Assume has_strip(t) is True.
+    """
+    t.branches = [b for b in t.branches if ⟦A+⟧]
+`),
+    },
   };
 
   // type: single_choice | multi_select | short_answer | code
@@ -722,6 +1192,158 @@ def close_exp(s, x):
       choices: ['abs', 'sub', 'abs(sub)', 'sub(abs)', 'lambda y: abs(x - y)', 'lambda x, y: abs(x - y)'] },
     { id: 'sp25-5h', problem: 'sp25-5d', label: 'i.', points: 0, topics: ['recursion'], difficulty: 'hard', blank: 'A+',
       type: 'code', prompt: 'Fill in the blank. If your answer is too long, you can continue on another line.' },
+
+    // Fall 2024 — Q1
+    { id: 'fa24-1a', problem: 'fa24-1', label: '(a)', points: 1, topics: ['trees'], difficulty: 'easy',
+      type: 'short_answer', prompt: '`crow.branches[0].label`' },
+    { id: 'fa24-1b', problem: 'fa24-1', label: '(b)', points: 1, topics: ['trees', 'lists'], difficulty: 'easy',
+      type: 'short_answer', prompt: '`[hide(b) for b in scare.branches]`' },
+    { id: 'fa24-1c', problem: 'fa24-1', label: '(c)', points: 1, topics: ['trees', 'hof', 'recursion'], difficulty: 'medium',
+      type: 'short_answer', prompt: '`climb(crow, hide)`' },
+    { id: 'fa24-1d', problem: 'fa24-1', label: '(d)', points: 1, topics: ['trees', 'hof', 'recursion'], difficulty: 'hard',
+      type: 'short_answer', prompt: '`climb(crow, run)`' },
+    { id: 'fa24-1e', problem: 'fa24-1', label: '(e)', points: 1, topics: ['fundamentals'], difficulty: 'medium',
+      type: 'short_answer', prompt: '`jump[jump[13]]`' },
+    // Fall 2024 — Q2
+    { id: 'fa24-2a', problem: 'fa24-2', label: '(a)', points: 3, topics: ['env', 'lists'], difficulty: 'hard',
+      type: 'short_answer', prompt: 'What would be printed by the expression `print(slice_up(t))` on line 11?' },
+    { id: 'fa24-2b', problem: 'fa24-2', label: '(b)', points: 1, topics: ['env', 'lists'], difficulty: 'medium',
+      type: 'single_choice', mono: true, prompt: 'What would be printed by the expression `print(t)` on line 12?',
+      choices: ['[1]', '[2]', '[3]', '[1, 4]', '[2, 4]', '[3, 4]', '[1, 4, 5]', '[2, 4, 5]', '[3, 4, 5]'] },
+    { id: 'fa24-2c', problem: 'fa24-2', label: '(c)', points: 1, topics: ['efficiency'], difficulty: 'easy',
+      type: 'single_choice', prompt: 'What is the order of growth of the time it takes to evaluate `list(list(q))` for a list of numbers `q` in terms of the length of `q`. Assume that creating a list with one element takes constant time, and making a copy of a list takes linear time in the length of the list.',
+      choices: ['exponential', 'quadratic', 'linear', 'logarithmic', 'constant'] },
+    // Fall 2024 — Q3
+    { id: 'fa24-3a', problem: 'fa24-3', label: '(a)', points: 1, topics: ['oop'], difficulty: 'easy', blank: 'a',
+      type: 'single_choice', mono: true, prompt: 'Fill in blank (a).', choices: ['1', 'p', 'len(p)', 'len(self.inventory)'] },
+    { id: 'fa24-3b', problem: 'fa24-3', label: '(b)', points: 2, topics: ['oop', 'trees', 'recursion'], difficulty: 'medium', blank: 'b',
+      type: 'short_answer', prompt: 'Fill in blank (b).' },
+    { id: 'fa24-3c', problem: 'fa24-3', label: '(c)', points: 3, topics: ['oop', 'hof'], difficulty: 'hard', blank: 'c',
+      type: 'short_answer', prompt: 'Fill in blank (c).' },
+    // Fall 2024 — Q4
+    { id: 'fa24-4a', problem: 'fa24-4a', label: 'i.', points: 1, topics: ['recursion'], difficulty: 'easy', blank: 'a',
+      type: 'single_choice', mono: true, prompt: 'Fill in blank (a).', choices: ['n == 0', 's == 0', 's == d', 'n == d'] },
+    { id: 'fa24-4b', problem: 'fa24-4a', label: 'ii.', points: 1, topics: ['recursion'], difficulty: 'easy', blank: 'b',
+      type: 'single_choice', mono: true, prompt: 'Fill in blank (b).', choices: ['n % d == 0', 's % d == 0', 'n % d > 0', 's % d > 0'] },
+    { id: 'fa24-4c', problem: 'fa24-4a', label: 'iii.', points: 2, topics: ['recursion'], difficulty: 'medium', blank: 'c',
+      type: 'short_answer', prompt: 'Fill in blank (c).' },
+    { id: 'fa24-4d', problem: 'fa24-4a', label: 'iv.', points: 2, topics: ['recursion'], difficulty: 'medium', blank: 'd',
+      type: 'short_answer', prompt: 'Fill in blank (d).' },
+    { id: 'fa24-4e', problem: 'fa24-4b', label: 'i.', points: 1, topics: ['generators', 'lists'], difficulty: 'easy', blank: 'e',
+      type: 'single_choice', mono: true, prompt: 'Fill in blank (e).', choices: ['n == s', 'n == s[0]', 'n in s', '[n] == s'] },
+    { id: 'fa24-4f', problem: 'fa24-4b', label: 'ii.', points: 3, topics: ['generators', 'recursion', 'lists'], difficulty: 'hard', blank: 'f',
+      type: 'short_answer', prompt: 'Fill in blank (f).' },
+    { id: 'fa24-4g', problem: 'fa24-4b', label: 'iii.', points: 1, topics: ['generators', 'lists'], difficulty: 'medium', blank: 'g',
+      type: 'single_choice', mono: true, prompt: 'Fill in blank (g).', choices: ['s + t', '[s] + t', 's[1:] + t', 's[:1] + t'] },
+    { id: 'fa24-4h', problem: 'fa24-4b', label: 'iv.', points: 1, topics: ['generators', 'recursion'], difficulty: 'medium', blank: 'h',
+      type: 'single_choice', mono: true, prompt: 'Fill in blank (h).',
+      choices: ['subsums(s, n)', 'subsums(s[1:], n)', 'subsums(s, n - 1)', 'subsums(s[1:], n - 1)'] },
+    { id: 'fa24-4i', problem: 'fa24-4c', label: 'i.', points: 1, topics: ['generators', 'hof'], difficulty: 'easy', blank: 'i',
+      type: 'single_choice', mono: true, prompt: 'Fill in blank (i).', choices: ['map', 'filter', 'sorted', 'subsums', 'semiperfect'] },
+    { id: 'fa24-4j', problem: 'fa24-4c', label: 'ii.', points: 1, topics: ['lists'], difficulty: 'easy', blank: 'j',
+      type: 'single_choice', mono: true, prompt: 'Fill in blank (j).',
+      choices: ['semiperfect(n)', 'semiperfect(k)', 'semiperfect(n) or semiperfect(k)', 'n % k == 0'] },
+    { id: 'fa24-4k', problem: 'fa24-4c', label: 'iii.', points: 1, topics: ['generators'], difficulty: 'easy', blank: 'k',
+      type: 'short_answer', prompt: 'Fill in blank (k).' },
+    { id: 'fa24-4l', problem: 'fa24-4c', label: 'iv.', points: 3, topics: ['hof', 'iterators'], difficulty: 'hard', blank: 'l',
+      type: 'short_answer', prompt: 'Fill in blank (l) of `primitive_semiperfect`, a function that takes a positive integer `n`. It returns `True` if `n` is semiperfect and no smaller semiperfect number is a divisor of `n`. Your answer should have two expressions separated by a comma.' },
+    // Fall 2024 — Q5
+    { id: 'fa24-5a', problem: 'fa24-5a', label: 'i.', points: 2, topics: ['links'], difficulty: 'medium', blank: 'a',
+      type: 'short_answer', prompt: 'Fill in blank (a).' },
+    { id: 'fa24-5b', problem: 'fa24-5a', label: 'ii.', points: 1, topics: ['links'], difficulty: 'easy', blank: 'b',
+      type: 'single_choice', mono: true, prompt: 'Fill in blank (b).', choices: ['a', 'b', 's', 't', 'longer(a, b)', 'longer(s, t)'] },
+    { id: 'fa24-5c', problem: 'fa24-5a', label: 'iii.', points: 1, topics: ['links'], difficulty: 'easy', blank: 'c',
+      type: 'single_choice', mono: true, prompt: 'Fill in blank (c).',
+      choices: ['a = a.rest', 'a = s.rest', 'b = b.rest', 'b = t.rest', 'a, b = a.rest, b.rest', 'a, b = s.rest, t.rest'] },
+    { id: 'fa24-5d', problem: 'fa24-5a', label: 'iv.', points: 1, topics: ['links'], difficulty: 'easy', blank: 'd',
+      type: 'single_choice', mono: true, prompt: 'Fill in blank (d).', choices: ['a', 'b', 's', 't', 'longer(a, b)', 'longer(s, t)'] },
+    { id: 'fa24-5e', problem: 'fa24-5b', label: 'i.', points: 1, topics: ['links', 'recursion'], difficulty: 'medium', blank: 'e',
+      type: 'single_choice', mono: true, prompt: 'Fill in blank (e).',
+      choices: ['longest(s, n)', 'longest(s, n - s.first)', 'longest(s.rest, n)', 'longest(s.rest, n - s.first)'] },
+    { id: 'fa24-5f', problem: 'fa24-5b', label: 'ii.', points: 2, topics: ['links', 'recursion'], difficulty: 'medium', blank: 'f',
+      type: 'short_answer', prompt: 'Fill in blank (f).' },
+    { id: 'fa24-5g', problem: 'fa24-5b', label: 'iii.', points: 3, topics: ['links', 'recursion'], difficulty: 'hard', blank: 'g',
+      type: 'short_answer', prompt: 'Fill in blank (g).' },
+    // Fall 2024 — Q6 (A+)
+    { id: 'fa24-6a', problem: 'fa24-6', label: '(a)', points: 0, topics: ['trees', 'hof', 'recursion'], difficulty: 'hard', blank: 'A+',
+      type: 'code', prompt: 'Fill in the blank.' },
+
+    // Spring 2024 — Q1
+    { id: 'sp24-1a', problem: 'sp24-1', label: '(a)', points: 2, topics: ['links', 'recursion'], difficulty: 'hard',
+      type: 'single_choice', mono: true, prompt: '`print(it)`',
+      choices: ['<2 5 7>', '<2 4 5 7>', '<2 4 5 6 7>', '<2 3 4 5 7>', '<2 4 3 5 7>', '<2 3 4 5 6 7>', '<2 4 3 5 6 7>'] },
+    { id: 'sp24-1b', problem: 'sp24-1', label: '(b)', points: 2, topics: ['links'], difficulty: 'hard',
+      type: 'short_answer', prompt: '`print(off)`' },
+    { id: 'sp24-1c', problem: 'sp24-1', label: '(c)', points: 2, topics: ['generators', 'links'], difficulty: 'medium',
+      type: 'short_answer', prompt: '`print([x*x for x in cruel(summer)])`' },
+    { id: 'sp24-1d', problem: 'sp24-1', label: '(d)', points: 1, topics: ['efficiency'], difficulty: 'medium',
+      type: 'single_choice', prompt: 'What is the order of growth of the time it takes to evaluate `shake(Link(1, Link(n)))` in terms of `n`?',
+      choices: ['exponential', 'quadratic', 'linear', 'constant'] },
+    // Spring 2024 — Q2
+    { id: 'sp24-2a', problem: 'sp24-2', label: '(a)', points: 2, topics: ['env', 'lists', 'hof'], difficulty: 'hard',
+      type: 'short_answer', prompt: 'What would be printed by the expression `print(a)` on line 8?' },
+    { id: 'sp24-2b', problem: 'sp24-2', label: '(b)', points: 2, topics: ['env', 'lists'], difficulty: 'medium',
+      type: 'short_answer', prompt: 'What would be printed by the expression `print(b)` on line 9?' },
+    { id: 'sp24-2c', problem: 'sp24-2', label: '(c)', points: 2, topics: ['env', 'lists'], difficulty: 'medium',
+      type: 'short_answer', prompt: 'What would be printed by the expression `print(c)` on line 13?' },
+    // Spring 2024 — Q3
+    { id: 'sp24-3a', problem: 'sp24-3', label: '(a)', points: 3, topics: ['oop', 'fundamentals', 'hof'], difficulty: 'hard', blank: 'a',
+      type: 'short_answer', prompt: 'Fill in blank (a).' },
+    { id: 'sp24-3b', problem: 'sp24-3', label: '(b)', points: 2, topics: ['oop', 'fundamentals'], difficulty: 'easy', blank: 'b',
+      type: 'single_choice', mono: true, prompt: 'Fill in blank (b).',
+      choices: ['self', 'self.speaker', 'self.speakers', 'self.speakers[k]', 'self.speakers[k].self', 'speaker', 'speakers', 'speakers[k]', 'speakers[k].self'] },
+    { id: 'sp24-3c', problem: 'sp24-3', label: '(c)', points: 2, topics: ['oop', 'fundamentals'], difficulty: 'medium', blank: 'c',
+      type: 'short_answer', prompt: 'Fill in blank (c).' },
+    { id: 'sp24-3d', problem: 'sp24-3', label: '(d)', points: 1, topics: ['oop'], difficulty: 'easy', blank: 'd',
+      type: 'single_choice', mono: true, prompt: 'Fill in blank (d).',
+      choices: ['s', 'lyrics', 'transform', 'transform(s)', 'transform(lyrics)', 'self.transform', 'self.transform(s)', 'self.transform(lyrics)'] },
+    // Spring 2024 — Q4 (blank letters restart in each part, so these ids include the part)
+    { id: 'sp24-4a-a', problem: 'sp24-4a', label: 'i.', points: 1, topics: ['lists'], difficulty: 'easy', blank: 'a',
+      type: 'single_choice', mono: true, prompt: 'Fill in blank (a).', choices: ['len(s) == 0', 's[0] + 1 == s[1]', 's[0] + 1 in s', 's[0] + 1 in s[1:]'] },
+    { id: 'sp24-4a-b', problem: 'sp24-4a', label: 'ii.', points: 1, topics: ['lists'], difficulty: 'easy', blank: 'b',
+      type: 'short_answer', prompt: 'Fill in blank (b).' },
+    { id: 'sp24-4a-c', problem: 'sp24-4a', label: 'iii.', points: 2, topics: ['lists'], difficulty: 'medium', blank: 'c',
+      type: 'single_choice', mono: true, prompt: 'Fill in blank (c).',
+      choices: ['s', 's[0]', 's[1]', 's[0] + 1', 's[0] + len(s)', 's[len(s) - 1]', 's[1] - s[0]'] },
+    { id: 'sp24-4b-a', problem: 'sp24-4b', label: 'i.', points: 1, topics: ['lists'], difficulty: 'medium', blank: 'a',
+      type: 'single_choice', mono: true, prompt: 'Fill in blank (a).', choices: ['t, s', 't, s[1:]', 't[1:], s'] },
+    { id: 'sp24-4b-b', problem: 'sp24-4b', label: 'ii.', points: 3, topics: ['lists'], difficulty: 'hard', blank: 'b',
+      type: 'short_answer', prompt: 'Fill in blank (b).' },
+    { id: 'sp24-4b-c', problem: 'sp24-4b', label: 'iii.', points: 1, topics: ['lists'], difficulty: 'easy', blank: 'c',
+      type: 'single_choice', mono: true, prompt: 'Fill in blank (c).',
+      choices: ['False', 's[0] != t[0]', 'is_strip(s) or is_strip(t)', 'not (is_strip(s) or is_strip(t))', 'is_strip(s) and is_strip(t)', 'not (is_strip(s) and is_strip(t))'] },
+    { id: 'sp24-4b-d', problem: 'sp24-4b', label: 'iv.', points: 2, topics: ['lists'], difficulty: 'medium', blank: 'd',
+      type: 'single_choice', mono: true, prompt: 'Fill in blank (d).',
+      choices: ['True', 'is_strip(s)', 'is_strip(t)', 'is_strip(s) or is_strip(t)', 'not (is_strip(s) or is_strip(t))', 'is_strip(s) and is_strip(t)', 'not (is_strip(s) and is_strip(t))'] },
+    { id: 'sp24-4c-a', problem: 'sp24-4c', label: 'i.', points: 2, topics: ['recursion', 'lists'], difficulty: 'medium', blank: 'a',
+      type: 'short_answer', prompt: 'Fill in blank (a).' },
+    { id: 'sp24-4c-b', problem: 'sp24-4c', label: 'ii.', points: 1, topics: ['hof'], difficulty: 'easy', blank: 'b',
+      type: 'single_choice', mono: true, prompt: 'Fill in blank (b).', choices: ['len', 'len(s)', 's[0]', 'lambda i: s[i]'] },
+    { id: 'sp24-4c-c', problem: 'sp24-4c', label: 'iii.', points: 1, topics: ['lists'], difficulty: 'easy', blank: 'c',
+      type: 'single_choice', mono: true, prompt: 'Fill in blank (c).', choices: ['[]', '[s]', 's[0]', 's[:1]'] },
+    { id: 'sp24-4c-d', problem: 'sp24-4c', label: 'iv.', points: 2, topics: ['lists'], difficulty: 'medium', blank: 'd',
+      type: 'short_answer', prompt: 'Fill in blank (d).' },
+    { id: 'sp24-4d-a', problem: 'sp24-4d', label: 'i.', points: 1, topics: ['trees', 'recursion'], difficulty: 'easy', blank: 'a',
+      type: 'single_choice', mono: true, prompt: 'Fill in blank (a).',
+      choices: ['True', 'False', 't', 't.label', 't.label == t + 1', 't + 1 == t.label'] },
+    { id: 'sp24-4d-b', problem: 'sp24-4d', label: 'ii.', points: 3, topics: ['trees', 'recursion'], difficulty: 'hard', blank: 'b',
+      type: 'short_answer', prompt: 'Fill in blank (b).' },
+    { id: 'sp24-4d-c', problem: 'sp24-4d', label: 'iii.', points: 1, topics: ['trees', 'recursion'], difficulty: 'easy', blank: 'c',
+      type: 'single_choice', mono: true, prompt: 'Fill in blank (c).',
+      choices: ['True', 'False', 't', 't.label', 't.label == t + 1', 't + 1 == t.label'] },
+    { id: 'sp24-4e-a', problem: 'sp24-4e', label: 'i.', points: 2, topics: ['generators', 'trees'], difficulty: 'easy', blank: 'a',
+      type: 'single_choice', mono: true, prompt: 'Fill in blank (a).', choices: ['None', 't', 't.label', '[t]', '[t.label]'] },
+    { id: 'sp24-4e-b', problem: 'sp24-4e', label: 'ii.', points: 1, topics: ['generators', 'trees'], difficulty: 'easy', blank: 'b',
+      type: 'single_choice', mono: true, prompt: 'Fill in blank (b).',
+      choices: ['t.label == b.label + 1', 'b.label == t.label + 1', 't.label == b.label + 1 and is_strip(b)', 'b.label == t.label + 1 and is_strip(b)'] },
+    { id: 'sp24-4e-c', problem: 'sp24-4e', label: 'iii.', points: 2, topics: ['generators', 'trees', 'recursion'], difficulty: 'medium', blank: 'c',
+      type: 'single_choice', mono: true, prompt: 'Fill in blank (c).',
+      choices: ['strips(t)', 'strips(b)', 't.branches', 'b.branches', 'range(len(t.branches))', 'range(len(b.branches))'] },
+    { id: 'sp24-4e-d', problem: 'sp24-4e', label: 'iv.', points: 2, topics: ['generators', 'trees', 'lists'], difficulty: 'medium', blank: 'd',
+      type: 'single_choice', mono: true, prompt: 'Fill in blank (d).',
+      choices: ['s', 't', 't + s', 't.label + s', '[t] + s', '[t.label] + s', '[t] + [s]', '[t.label] + [s]'] },
+    { id: 'sp24-4aplus', problem: 'sp24-4aplus', label: 'v.', points: 0, topics: ['trees', 'recursion', 'lists'], difficulty: 'hard', blank: 'A+',
+      type: 'code', prompt: 'Fill in the blank.' },
   ];
 
   // correct: choice index (single), array of indices (multi)
@@ -790,6 +1412,69 @@ def close_exp(s, x):
     'sp25-5f': { accepted: ['close(s[i:], x - product(s[:i]))'], explanation: 'The first `i` numbers are multiplied together as one term. The rest of the list should come as close as possible to the remaining target.' },
     'sp25-5g': { correct: [4], explanation: '`key` must be a one-argument function that scores each candidate `y` by its distance to `x`.' },
     'sp25-5h': { accepted: ["'+' + close_exp(s[i+1:], x - eval(term))"] },
+
+    'fa24-1a': { accepted: ['0'], explanation: '`crow.branches[0]` is `scare`, whose label is 0.' },
+    'fa24-1b': { accepted: ['[4, 5, 2]'], explanation: '`hide` returns a tree’s label, so this lists the labels of `scare`’s branches in order.' },
+    'fa24-1c': { accepted: ['[9, 7, 6]'], explanation: 'With `key=hide`, `climb` follows the branch with the largest label: from 9 it picks 7 (over `scare`, labeled 0), then the leaf 6.' },
+    'fa24-1d': { accepted: ['[9, 0, 5, 10]'], explanation: '`run(t)` is the largest leaf label below `t`. `run(scare)` is 10 and `run(Tree(7, ...))` is 6, so `climb` goes to `scare` (0), then to `Tree(5, [Tree(10)])` (largest leaf 10), then to the leaf 10.' },
+    'fa24-1e': { accepted: ['4'], explanation: '`jump` maps `2 * x - 1` to `x`. `jump[13]` is 7, and `jump[7]` is 4.' },
+    'fa24-2a': { accepted: ['[[1], [3, 4], [2]]'], explanation: '`s` and `copy` are the global list `t`, and the local `t` starts as a list holding that same list. Each loop iteration appends a slice (a new list), pops the last element, then sets `s[0]`. The slices are `[3, 4]` and then `[2]`. By the end the original list is `[1]`, and since the first element of the result *is* that list, it prints as `[1]`.' },
+    'fa24-2b': { correct: 0, explanation: 'The global `t` is the same list `slice_up` mutated: after the second pop it is `[2]`, and `s[0] = len(s)` makes it `[1]`.' },
+    'fa24-2c': { correct: 2, explanation: 'Each `list(...)` copies a list of length n once. Two copies is still linear.' },
+    'fa24-3a': { correct: 0, explanation: 'The comprehension already keeps only the matching programs, so count 1 for each.' },
+    'fa24-3b': { accepted: ['b.copies(s)', 'Store.copies(b, s)'], explanation: 'Each branch is itself a `Store`, so it counts the copies in its own tree recursively.' },
+    'fa24-3c': { accepted: ['self.branches[k].inventory.append', 'lambda s: self.branches[k].inventory.append(s)', 'lambda x: self.branches[k].inventory.append(x)', 'lambda p: self.branches[k].inventory.append(p)'], explanation: 'The bound method `append` of the branch’s inventory list is already a function that takes a string and appends it.' },
+    'fa24-4a': { correct: 1, explanation: '`s` is how much of the sum is still left to make. Reaching exactly 0 means the chosen divisors add up to `n`.' },
+    'fa24-4b': { correct: 0, explanation: 'Only proper divisors of `n` may be used, so `d` has to divide `n`.' },
+    'fa24-4c': { accepted: ['s - d'], explanation: 'Using `d` leaves `s - d` still to make, using only larger candidates (`d + 1` onward), so no divisor repeats.' },
+    'fa24-4d': { accepted: ['f(s, d + 1)'], explanation: 'Skip `d` and try the next candidate with the same amount left.' },
+    'fa24-4e': { correct: 1, explanation: 'If the first element alone equals `n`, the one-element sublist `[n]` works.' },
+    'fa24-4f': { accepted: ['subsums(s[1:], n-s[0])'], explanation: 'Sublists that use `s[0]`: the rest must come from `s[1:]` and sum to `n - s[0]`.' },
+    'fa24-4g': { correct: 3, explanation: '`s[:1]` is the list `[s[0]]`, so this puts the first element in front of each sublist `t` from the rest.' },
+    'fa24-4h': { correct: 1, explanation: 'Sublists that skip `s[0]` come from `s[1:]` and still sum to `n`.' },
+    'fa24-4i': { correct: 3 },
+    'fa24-4j': { correct: 3, explanation: 'Keep only the proper divisors of `n`. `subsums` then finds the groups of them that sum to `n`.' },
+    'fa24-4k': { accepted: ['n'] },
+    'fa24-4l': { accepted: ['lambda k: n % k == 0, range(1, n)', 'lambda d: n % d == 0, range(1, n)', 'lambda x: n % x == 0, range(1, n)'], explanation: '`filter` takes a function and an iterable: keep each `k` in `1 .. n-1` that divides `n`, then check whether any of them is semiperfect.' },
+    'fa24-5a': { accepted: ['a is Link.empty', 'a == Link.empty'], explanation: '`a` and `b` move forward together. If `a` runs out while `b` still has elements, `t` is longer.' },
+    'fa24-5b': { correct: 3 },
+    'fa24-5c': { correct: 4 },
+    'fa24-5d': { correct: 2, explanation: 'The loop ended because `b` ran out, so `s` is at least as long as `t`, and ties return `s`.' },
+    'fa24-5e': { correct: 2, explanation: '`t` is the best sublist that leaves out `s.first`.' },
+    'fa24-5f': { accepted: ['s.first <= n', 'n >= s.first'], explanation: '`s.first` can only be included if it fits within the limit.' },
+    'fa24-5g': { accepted: ['Link(s.first, longest(s.rest, n - s.first))'], explanation: 'The best sublist that includes `s.first` is a new `Link` (so `s` is not mutated) in front of the longest sublist of the rest that fits in what is left, `n - s.first`.' },
+    'fa24-6a': { accepted: ['g(x + max_path(b, lambda p: g(x + p)))'] },
+
+    'sp24-1a': { correct: 5, explanation: '`shake` inserts the missing numbers: between 2 and 5 it adds 4 and then 3 (each time re-checking the same node), and between 5 and 7 it adds 6.' },
+    'sp24-1b': { accepted: ['<1 5 6 7>'], explanation: '`off` shares the original `Link(5, Link(7))` node with `it`. `shake` changes that node’s `rest` to start with 6, which `off` sees too. The 3 and 4 were inserted before the 5 node, so `off` does not see them.' },
+    'sp24-1c': { accepted: ['[1, 9]'], explanation: '`cruel` yields every other element, 1 and 3, so the squares are 1 and 9.' },
+    'sp24-1d': { correct: 2, explanation: 'Each call inserts one number or moves one step forward, and there are about n numbers to insert, so the number of calls grows linearly.' },
+    'sp24-2a': { accepted: ['[None]'], explanation: '`f` returns a list containing the result of `rest.append(a)`, and `append` returns `None`.' },
+    'sp24-2b': { accepted: ['[4, [2, 3], 5]'], explanation: 'Inside `f`, `b` gets the popped 4 and then the list `a` (which is `c`, now `[2, 3]`). `b + [5]` makes a new list with 5 at the end.' },
+    'sp24-2c': { accepted: ['[2, 3]'], explanation: '`a.pop()` removed 4 from `c`. Rebinding `a` inside `cycle` does not change `c`.' },
+    'sp24-3a': { accepted: ["{'Front': Speaker(lambda x: x)}", "{'Front': Speaker(lambda s: s)}"], explanation: 'Each `Mic` gets its own new dictionary, with a `Front` speaker whose transform returns its input unchanged.' },
+    'sp24-3b': { correct: 3 },
+    'sp24-3c': { accepted: ['m.speakers[location] = self'] },
+    'sp24-3d': { correct: 6 },
+    'sp24-4a-a': { correct: 0, explanation: 'Check the empty list first: the other options index `s[0]` or `s[1]`, which fails for short lists.' },
+    'sp24-4a-b': { accepted: ['s[0]'] },
+    'sp24-4a-c': { correct: 4, explanation: 'A strip of length `len(s)` that starts at `s[0]` is `range(s[0], s[0] + len(s))`.' },
+    'sp24-4b-a': { correct: 1, explanation: 'After using `s[0]`, the strip continues with `t[0]`, so swap the roles: `t` becomes the list whose first element comes next.' },
+    'sp24-4b-b': { accepted: ['len(s) > 1 and s[0] + 1 == s[1]', 'len(s) > 1 and s[1] == s[0] + 1', 'len(s) >= 2 and s[0] + 1 == s[1]'], explanation: 'Otherwise the next number must be the next element of `s`. Check the length first so `s[1]` exists.' },
+    'sp24-4b-c': { correct: 0 },
+    'sp24-4b-d': { correct: 5, explanation: 'When one list is used up, what is left of the other must continue the strip by itself.' },
+    'sp24-4c-a': { accepted: ['longest(s[1:])'] },
+    'sp24-4c-b': { correct: 0, explanation: '`max` returns the first of equal-length strips, which is the one that starts earlier in `s`.' },
+    'sp24-4c-c': { correct: 3, explanation: '`s[:1]` is a new one-element list starting the strip, and it supports `append`.' },
+    'sp24-4c-d': { accepted: ['k == result[-1] + 1', 'result[-1] + 1 == k'] },
+    'sp24-4d-a': { correct: 0, explanation: 'A path with one label is a strip.' },
+    'sp24-4d-b': { accepted: ['b.label == t.label + 1 and has_strip(b)', 't.label + 1 == b.label and has_strip(b)'], explanation: 'A path through `b` is a strip if `b`’s label is one more than `t`’s and `b` has a strip path of its own.' },
+    'sp24-4d-c': { correct: 1 },
+    'sp24-4e-a': { correct: 4 },
+    'sp24-4e-b': { correct: 1 },
+    'sp24-4e-c': { correct: 1 },
+    'sp24-4e-d': { correct: 5 },
+    'sp24-4aplus': { accepted: ['has_strip(b) and (only_strips(b) or t.label + 1 == b.label)'] },
   };
 
   return { TOPICS, EXAMS, PROBLEMS, QUESTIONS, ANSWER_KEY, BUBBLE_NOTE };

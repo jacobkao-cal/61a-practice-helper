@@ -27,9 +27,13 @@ for job in json.load(open(os.path.join(dir, 'jobs.json'))):
     if error:
         out.append({'passed': False, 'summary': 'code raised before tests: ' + error.strip().splitlines()[-1]})
         continue
+    # A version passes only if every case passes, so the first failing case settles it; skipping the rest keeps
+    # versions that loop forever from costing a 5-second timeout per case.
     statuses = []
     for case in job['cases']:
         r = json.loads(limited(run_case, job['code'], job['setup'], case, 5000))
         statuses.append(r['status'])
+        if r['status'] != 'passed':
+            break
     out.append({'passed': all(s == 'passed' for s in statuses), 'summary': ', '.join(statuses)})
 print(json.dumps(out))

@@ -22,8 +22,10 @@ const VARIANTS = require('./test_bank/variants.js');
 const HARNESS = fs.readFileSync(path.join(ROOT, 'app', 'runner.js'), 'utf8').match(/const HARNESS = String\.raw`([\s\S]*?)`;/)[1];
 
 // Problems that must never get a suite: What Would Python Display, environment diagrams, an order-of-growth
-// question, and one whose multi-select blank can't be judged by running code (any one correct option runs fine).
-const EXCLUDED = ['fa25-1', 'sp25-1', 'fa25-2', 'sp25-2', 'sp25-2c', 'sp25-3b'];
+// question, and problems whose choices can't be judged by running code: sp25-3b (any one correct option of its
+// select-all blank runs fine) and sp24-4b (in that skeleton the loop always ends with t empty, so the wrong option
+// is_strip(s) behaves exactly like the official is_strip(s) and is_strip(t)).
+const EXCLUDED = ['fa25-1', 'sp25-1', 'fa25-2', 'sp25-2', 'sp25-2c', 'sp25-3b', 'fa24-1', 'fa24-2', 'sp24-1', 'sp24-2', 'sp24-4b'];
 
 let problems = 0;
 const fail = (m) => { console.log(`FAIL  ${m}`); problems++; };

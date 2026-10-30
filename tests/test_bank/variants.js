@@ -160,4 +160,163 @@ module.exports = {
       { 'A+': "'+' + str(close(s[i+1:], x - eval(term)))" },
     ],
   },
+
+  // ── Fall 2024 Midterm 2 ──
+  'fa24-3': {
+    wrong: [
+      { b: 'b.inventory.count(s)' },
+      { b: 'len(b.inventory)' },
+      { b: 'b.copies(p)' },
+      { b: 'copies(b, s)' },
+      { c: 'self.branches[k].inventory' },
+      { c: 'self.inventory.append' },
+      { c: 'self.branches[k].append' },
+      { c: 'self.branches[k].inventory.append(s)' },
+      { c: 'lambda s: self.branches[k].inventory + [s]' },
+    ],
+  },
+  'fa24-4a': {
+    wrong: [
+      { c: 'd' },
+      { c: 's + d' },
+      { c: 'n - d' },
+      { c: 's - 1' },
+      { d: 'False' },
+      { d: 'f(s - d, d + 1)' },
+      { d: 'f(n, d + 1)' },
+      { d: 'f(s, d)' },
+    ],
+  },
+  'fa24-4b': {
+    wrong: [
+      { f: 'subsums(s[1:], n)' },
+      { f: 'subsums(s[1:], n - 1)' },
+      { f: 'subsums(s[1:], s[0] - n)' },
+      { f: 'subsums(s[:1], n - s[0])' },
+      { f: 'subsums(s, n - s[0])' },
+    ],
+  },
+  'fa24-4c': {
+    wrong: [
+      { k: 'n - 1' },
+      { k: '0' },
+      { k: 'k' },
+      { l: 'lambda k: n % k == 0, range(1, n + 1)' },
+      { l: 'lambda k: n % k == 0, range(n)' },
+      { l: 'lambda k: n % k, range(1, n)' },
+      { l: 'lambda k: k % n == 0, range(1, n)' },
+      { l: 'semiperfect, range(1, n)' },
+    ],
+    alternatives: [
+      { l: 'lambda k: not n % k, range(1, n)' },
+      { l: 'lambda d: n % d == 0, range(2, n)' },  // 1 is never semiperfect
+    ],
+  },
+  'fa24-5a': {
+    wrong: [
+      { a: 'b is Link.empty' },
+      { a: 'a.rest is Link.empty' },
+      { a: 'a is not Link.empty' },
+      { a: 'a == b' },
+      { a: 'False' },
+    ],
+    alternatives: [
+      { a: 'not a' },
+    ],
+  },
+  'fa24-5b': {
+    wrong: [
+      { f: 's.first < n' },
+      { f: 'n > 0' },
+      { f: 's.first >= n' },
+      { f: 's.rest is not Link.empty' },
+      { g: 'Link(s.first, t)' },
+      { g: 'Link(s.first, longest(s.rest, n))' },
+      { g: 'longest(s.rest, n - s.first)' },
+      { g: 's' },
+    ],
+    alternatives: [
+      { f: 'n - s.first >= 0' },
+    ],
+  },
+  'fa24-6': {
+    wrong: [
+      { 'A+': 'g(x + [b.label])' },
+      { 'A+': 'g(x + max_path(b, g))' },
+      { 'A+': 'g(max_path(b, g))' },
+      { 'A+': 'max_path(b, g)' },
+    ],
+    alternatives: [
+      { 'A+': 'g([t.label] + max_path(b, lambda p: g([t.label] + p)))' },
+    ],
+  },
+
+  // ── Spring 2024 Midterm 2 ──
+  'sp24-3': {
+    wrong: [
+      { a: '{}' },
+      { a: "{'Front': Speaker}" },
+      { a: "{'Front': lambda x: x}" },
+      { a: "{'Front': Speaker(str.lower)}" },
+      { c: 'm.speakers[location] = self.transform' },
+      { c: 'self.speakers[location] = self' },
+      { c: 'm.speakers = {location: self}' },
+      { c: "m.speakers['location'] = self" },
+      { c: 'm.speakers[self] = location' },
+    ],
+    alternatives: [
+      { a: 'dict(Front=Speaker(lambda x: x))' },
+      { c: 'm.speakers.update({location: self})' },
+    ],
+  },
+  'sp24-4a': {
+    wrong: [
+      { b: 's[0] + 1' },
+      { b: '0' },
+      { b: 's[-1]' },
+      { b: 'len(s)' },
+    ],
+    alternatives: [
+      { b: 'min(s)' },
+    ],
+  },
+  'sp24-4c': {
+    wrong: [
+      { a: 'longest_with_s0(s[1:])' },
+      { a: 'longest(s)' },
+      { a: 's[1:]' },
+      { a: 'longest(s[:-1])' },
+      { d: 'k == result[0] + 1' },
+      { d: 'k > result[-1]' },
+      { d: 'k == s[0] + 1' },
+      { d: 'k - 1 in result' },
+    ],
+    alternatives: [
+      { d: 'k - result[-1] == 1' },
+    ],
+  },
+  'sp24-4d': {
+    wrong: [
+      { b: 'b.label == t.label + 1' },
+      { b: 'has_strip(b)' },
+      { b: 'b.label == t.label + 1 or has_strip(b)' },
+      { b: 't.label == b.label + 1 and has_strip(b)' },
+      { b: 'b.label == t.label + 1 and is_strip(b)' },
+    ],
+    alternatives: [
+      { b: 'has_strip(b) and b.label - t.label == 1' },
+    ],
+  },
+  'sp24-4e': { wrong: [] },  // every blank is multiple choice; all wrong options are generated
+  'sp24-4aplus': {
+    wrong: [
+      { 'A+': 'has_strip(b)' },
+      { 'A+': 't.label + 1 == b.label' },
+      { 'A+': 'has_strip(b) and t.label + 1 == b.label' },
+      { 'A+': 'only_strips(b) or has_strip(b)' },
+    ],
+    alternatives: [
+      { 'A+': 't.label + 1 == b.label and has_strip(b) and not only_strips(b)' },
+    ],
+  },
 };
