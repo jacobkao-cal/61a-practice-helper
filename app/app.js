@@ -8,6 +8,7 @@
   'use strict';
 
   const { TOPICS, EXAMS, PROBLEMS, QUESTIONS, ANSWER_KEY, BUBBLE_NOTE } = window.CS61A_BANK;
+  const GUIDES = window.CS61A_GUIDES || {}; // topic id -> study-guide concepts (data/study_guides.js)
   const QMAP = Object.fromEntries(QUESTIONS.map((q) => [q.id, q]));
   const ORDER = Object.fromEntries(QUESTIONS.map((q, i) => [q.id, i]));
   const STORE_KEY = 'cs61a-practice:v1';
@@ -30,7 +31,7 @@
   const EXAM_DEFAULT_MINUTES = 120;
   const EXAM_MAX_MINUTES = 300;
   const DEFAULT_EXAM_PREFS = { kind: 'full', examId: Object.keys(EXAMS)[0], topics: [], picked: [], timerOn: true, minutes: EXAM_DEFAULT_MINUTES };
-  const STORE_VERSION = 2; // v1 had prefs/session/notes/annotations only; v2 adds exam, attempts, examPrefs
+  const STORE_VERSION = 3; // v1: prefs/session/notes/annotations; v2: + exam, attempts, examPrefs; v3: + reviews, frozen grades
 
   function load() {
     try { return JSON.parse(localStorage.getItem(STORE_KEY)); } catch (e) { return null; }
@@ -97,7 +98,14 @@
     examPrefs: Object.assign({}, DEFAULT_EXAM_PREFS, saved && saved.examPrefs),
     exam: migrateAttempt(saved && saved.exam),         // the exam in progress (never submitted), or null
     attempts: ((saved && saved.attempts) || []).map(migrateAttempt).filter(Boolean), // submitted exams, oldest first
+    reviews: (saved && saved.reviews && typeof saved.reviews === 'object') ? saved.reviews : {}, // attemptId -> review workspace
   };
+  // Drop review workspaces whose attempt is gone or whose record is damaged (they are rebuilt from the attempt on open).
+  Object.keys(store.reviews).forEach((id) => {
+    const w = store.reviews[id];
+    const a = store.attempts.find((x) => x.id === id);
+    if (!a || !w || w.reviewOf !== id || !w.answers || typeof w.answers !== 'object' || !Array.isArray(w.groups)) delete store.reviews[id];
+  });
   if (!EXAMS[store.examPrefs.examId]) store.examPrefs.examId = DEFAULT_EXAM_PREFS.examId;
   store.examPrefs.picked = [...new Set(store.examPrefs.picked)].filter((pid) => PROBLEMS[pid]);
   // view: which session the question screen shows. 'practice' | 'exam' (in progress) | 'review' (a submitted attempt)
@@ -106,11 +114,29 @@
   const attemptById = (id) => store.attempts.find((a) => a.id === id) || null;
   function cur() {
     if (ui.view === 'exam') return store.exam;
-    if (ui.view === 'review') return attemptById(ui.attemptId);
+    if (ui.view === 'review') return workspaceFor(ui.attemptId);
     return store.session;
   }
   const isExam = (s) => !!s && s.mode === 'exam';
-  const locked = (s) => isExam(s) && !!s.submitted; // submitted attempts are read-only
+  const locked = (s) => isExam(s) && !!s.submitted; // a submitted attempt itself is never edited
+  const isReview = (s) => !!s && !!s.reviewOf;    // a review workspace (editable copy of a submitted attempt)
+
+  // Review workspace: an editable, session-shaped copy of a submitted attempt, created once from the submitted
+  // answers and stored separately (store.reviews). The attempt itself — answers, grades, score — never changes.
+  function workspaceFor(id) {
+    const a = attemptById(id);
+    if (!a) return null;
+    if (!store.reviews[id]) {
+      const copy = (x) => JSON.parse(JSON.stringify(x || {}));
+      store.reviews[id] = {
+        reviewOf: id, mode: 'exam', title: a.title, kind: a.kind, examId: a.examId,
+        ids: a.ids.slice(), groups: copy(a.groups), index: 0,
+        answers: copy(a.answers), eliminated: copy(a.eliminated), notes: copy(a.notes), annotations: copy(a.annotations),
+        marked: {}, checked: {}, revealed: {}, selfGrade: {}, timer: null, startedAt: Date.now(),
+      };
+    }
+    return store.reviews[id];
+  }
   const notesOf = () => (isExam(cur()) ? cur().notes : store.notes);
   const annotationsOf = () => (isExam(cur()) ? cur().annotations : store.annotations);
 
@@ -191,22 +217,32 @@
     return 'staff';
   }
   const hasPoints = (q) => typeof q.points === 'number';
-  // Score over the parts that can be graded here and have a published point value. It is only a
-  // final score when nothing worth points was left out (staff-graded or unknown point value).
-  function examScore(s) {
-    const r = { earned: 0, possible: 0, counts: { correct: 0, incorrect: 0, staff: 0, skipped: 0 }, staff: 0, unknown: 0 };
-    s.ids.forEach((id) => {
+  // Gradable here at all (by question type, whatever the answer): choices, and short answers with accepted answers.
+  const autoGradable = (q) => isMC(q) || (q.type === 'short_answer' && !!(ANSWER_KEY[q.id] && ANSWER_KEY[q.id].accepted && ANSWER_KEY[q.id].accepted.length));
+  // Grades are computed once, at submission, and stored on the attempt (graded + score), so later changes
+  // to the question bank or answer key never silently change an old attempt's result.
+  function gradeAttempt(a) {
+    const graded = {};
+    a.ids.forEach((id) => { graded[id] = examStatus(a, id); });
+    return { graded, score: scoreFrom(a.ids, graded) };
+  }
+  // "Automatically graded" score: only auto-gradable parts with a published point value count, in both
+  // numerator and denominator. Staff-graded parts and parts without point values are excluded (and reported).
+  function scoreFrom(ids, graded) {
+    const r = { v: 2, earned: 0, possible: 0, auto: 0, counts: { correct: 0, incorrect: 0, staff: 0, skipped: 0 }, staff: 0, unknown: 0 };
+    ids.forEach((id) => {
       const q = QMAP[id];
-      const st = examStatus(s, id);
-      r.counts[st]++;
-      if (st === 'staff') { if (q.points !== 0) r.staff++; return; }
+      r.counts[graded[id]]++;
+      if (!autoGradable(q)) { r.staff++; return; }
       if (!hasPoints(q)) { r.unknown++; return; }
+      r.auto++;
       r.possible += q.points;
-      if (st === 'correct') r.earned += q.points;
+      if (graded[id] === 'correct') r.earned += q.points;
     });
     r.partial = r.staff > 0 || r.unknown > 0;
     return r;
   }
+  const statusIn = (a, id) => (a.graded && a.graded[id]) || examStatus(a, id);
   const fmtPts = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
 
   // ───────────────────────────── Scratch code editor (left pane) ─────────────────────────────
@@ -222,9 +258,16 @@
     const m = PROBLEMS[pid].code.match(/^(?:def|class)\s+(\w+)/m);
     return m ? `${m[1]}.py` : `problem_${PROBLEMS[pid].number.replace(/\W+/g, '')}.py`;
   }
+  // The code a problem's editor starts from (and resets to): the exam template, or in a review workspace
+  // the scratch code as it was when the attempt was submitted.
+  function notesBase(pid) {
+    const s = cur();
+    const a = isReview(s) && attemptById(s.reviewOf);
+    return a && a.notes[pid] !== undefined ? a.notes[pid] : PROBLEMS[pid].code;
+  }
   function editedNotes(pid) {
     const notes = notesOf();
-    return notes[pid] !== undefined && notes[pid] !== PROBLEMS[pid].code;
+    return notes[pid] !== undefined && notes[pid] !== notesBase(pid);
   }
   function partForBlank(pid, name) {
     const s = cur();
@@ -283,14 +326,12 @@
     const wrap = document.createElement('div');
     wrap.className = 'editor-body';
     const notes = notesOf(); // captured: this editor only ever writes to the session it was built for
-    const readOnly = locked(cur());
-    const value = notes[pid] !== undefined ? notes[pid] : PROBLEMS[pid].code;
+    const value = notes[pid] !== undefined ? notes[pid] : notesBase(pid);
     if (!window.CodeMirror) { // fallback if the vendored editor failed to load
       const ta = document.createElement('textarea');
       ta.className = 'editor-fallback';
       ta.value = value;
       ta.spellcheck = false;
-      ta.readOnly = readOnly;
       ta.setAttribute('aria-label', 'Scratch code editor');
       ta.addEventListener('input', () => { notes[pid] = ta.value; saveSoon(); });
       wrap.appendChild(ta);
@@ -299,7 +340,7 @@
     const cm = window.CodeMirror(wrap, {
       value, mode: 'python', theme: 'monokai', lineNumbers: true, indentUnit: 4, tabSize: 4,
       indentWithTabs: false, matchBrackets: true, autoCloseBrackets: true, viewportMargin: Infinity,
-      screenReaderLabel: 'Scratch code editor', readOnly,
+      screenReaderLabel: 'Scratch code editor',
       extraKeys: {
         Tab: (c) => (c.somethingSelected() ? c.indentSelection('add') : c.replaceSelection('    ')),
         'Shift-Tab': (c) => c.indentSelection('subtract'),
@@ -338,13 +379,14 @@
     });
   }
   function resetEditor(pid) {
+    const base = notesBase(pid);
     delete notesOf()[pid];
     annotationsOf()[pid] = anns(pid).filter((a) => a.kind !== 'code'); // code highlights can't survive a reset
     const ed = editors[pid];
     if (ed && ed.cm) {
       Object.values(ed.hl).forEach((m) => m.clear());
       ed.hl = {};
-      ed.cm.setValue(PROBLEMS[pid].code);
+      ed.cm.setValue(base);
       buildBlanks(ed);
     } else delete editors[pid];
     save();
@@ -832,8 +874,7 @@
     }
     stopActive(s, end);
     Object.assign(s, { submitted: true, finished: true, finishedAt: end, autoSubmitted: !!auto, leftAt: null });
-    const sc = examScore(s);
-    s.score = { earned: sc.earned, possible: sc.possible, partial: sc.partial }; // snapshot for history
+    Object.assign(s, gradeAttempt(s)); // frozen grades + score for results and history
     store.attempts.push(s);
     store.exam = null;
     setView('review', s.id);
@@ -1076,13 +1117,13 @@
   }
 
   function scoreText(sc) {
-    return `${sc.partial ? 'Partial Score' : 'Final Score'} ${fmtPts(sc.earned)} / ${fmtPts(sc.possible)}`;
+    return sc.auto ? `Auto-graded ${fmtPts(sc.earned)} / ${fmtPts(sc.possible)} pts` : 'No auto-graded points';
   }
   function renderHistory() {
     if (!store.attempts.length) return '';
     const rows = store.attempts.slice().reverse().map((a) => `<button class="result-row hist-row" data-action="open-attempt" data-id="${a.id}">
         <span class="t">${esc(a.title)}<small>${kindLabel(a)} · ${when(a.finishedAt)} · ${fmt(activeMs(a))} spent${a.autoSubmitted ? ' · time ran out' : ''}</small></span>
-        <span class="badge ${examScore(a).partial ? 'ungraded' : 'correct'}">${scoreText(examScore(a))}</span></button>`).join('');
+        <span class="badge ungraded">${scoreText(a.score)}</span></button>`).join('');
     return `<section class="history" aria-label="Exam history"><h2>Exam history</h2><div class="result-list">${rows}</div>
       <p class="hint">Every submitted attempt is kept, including retakes. Click one to see its results and review it.</p></section>`;
   }
@@ -1103,8 +1144,8 @@
     const topicIds = [...new Set(g.ids.flatMap((id) => QMAP[id].topics))];
     const topics = topicIds.map((t) => `<span class="tag">${esc(TOPICS.find((x) => x.id === t).name)}</span>`).join('');
     const tool = (k, label, extra) => `<button class="ann-btn" data-ann="${k}" title="${label}" aria-label="${label}" ${extra || ''}>${icon(k)}</button>`;
-    const ro = locked(cur());
-    const bar = ro ? '<div class="annot-bar"><span class="annot-hint">Read-only review: your scratch code and annotations from this attempt.</span></div>' : `<div class="annot-bar" id="annot-bar" role="toolbar" aria-label="Annotation tools">
+    const review = isReview(cur());
+    const bar = `<div class="annot-bar" id="annot-bar" role="toolbar" aria-label="Annotation tools">
         ${tool('hl', 'Highlighter (select text)', 'aria-pressed="false"')}
         ${tool('pen', 'Red pen', 'aria-pressed="false"')}
         ${tool('eraser', 'Eraser', 'aria-pressed="false"')}
@@ -1121,15 +1162,24 @@
         <div class="editor">
           <div class="editor-head">
             <span class="editor-file">${esc(fileName(g.pid))}</span>
-            <span class="editor-status" id="editor-status">${ro ? 'Read-only' : editedNotes(g.pid) ? 'Saved in this browser' : 'Editable: type notes or code'}</span>
-            ${ro ? '' : `<span class="editor-tools"><button class="btn btn-sm ed-btn" id="editor-reset" data-action="reset-code" ${editedNotes(g.pid) ? '' : 'disabled'} title="Restore the original exam code">Reset code</button></span>`}
+            <span class="editor-status" id="editor-status">${editedNotes(g.pid) ? 'Saved in this browser' : review ? 'Submitted version · editable' : 'Editable: type notes or code'}</span>
+            <span class="editor-tools"><button class="btn btn-sm ed-btn" id="editor-reset" data-action="reset-code" ${editedNotes(g.pid) ? '' : 'disabled'}
+              title="${review ? 'Restore the scratch code exactly as it was when you submitted' : 'Restore the original exam code'}">${review ? 'Reset code to submitted version' : 'Reset code'}</button></span>
           </div>
           <div id="editor-host"></div>
+          ${runSlotHTML(g.pid)}
         </div>
-        <p class="editor-hint">${ro ? 'Blanks show your submitted answers: <span class="key-fill key-mc">selected choice</span> <span class="key-fill key-typed">typed answer</span>.</p>' : `Your answers on the right appear in the blanks automatically: <span class="key-fill key-mc">selected choice</span> <span class="key-fill key-typed">typed answer</span>. Click a blank to jump to its part. You can also type notes or <code>#</code> comments anywhere in the code; nothing is run. <kbd>Tab</kbd> indents, <kbd>⌘/</kbd> toggles a comment.</p>`}
+        <p class="editor-hint">${review ? 'Your review answers (below) appear in the blanks: <span class="key-fill key-mc">selected choice</span> <span class="key-fill key-typed">typed answer</span>. Edit the code freely; your submitted version is kept. <kbd>Tab</kbd> indents, <kbd>⌘/</kbd> toggles a comment.</p>' : `Your answers on the right appear in the blanks automatically: <span class="key-fill key-mc">selected choice</span> <span class="key-fill key-typed">typed answer</span>. Click a blank to jump to its part. You can also type notes or <code>#</code> comments anywhere in the code; nothing is run. <kbd>Tab</kbd> indents, <kbd>⌘/</kbd> toggles a comment.</p>`}
         <div class="annot-text" data-annot="outro"></div>
         <svg class="annot-layer" aria-hidden="true"></svg>
-      </article>`;
+      </article>
+      ${review ? '<section class="review-work" id="review-work" aria-label="Review workspace"></section>' : ''}`;
+  }
+  // Phase 6 extension point: the single "Run Code" action and its output / doctest panel for a problem's
+  // Python workspace mount here (Pyodide in a Web Worker). Results will be learning feedback only: no points,
+  // no change to submitted answers or scores. Nothing runs in this phase, so the slot stays empty and hidden.
+  function runSlotHTML(pid) {
+    return `<div class="run-slot" id="run-slot-${pid}" data-run-slot="${pid}" hidden></div>`;
   }
   // Build the left pane for a group. Runs only when the group changes, so annotations, the editor,
   // the text selection and the scroll position are never wiped by ordinary re-renders.
@@ -1159,12 +1209,11 @@
   function renderChoices(q, s) {
     const a = s.answers[q.id];
     const key = ANSWER_KEY[q.id];
-    const review = locked(s);
-    const revealed = review || (!isExam(s) && !!s.revealed[q.id]);
+    const revealed = !isExam(s) && !!s.revealed[q.id]; // exams (and review workspaces) never show grading here
     const checked = !isExam(s) && s.checked[q.id];
     const multi = q.type === 'multi_select';
     const correctSet = new Set(multi ? key.correct : [key.correct]);
-    const elim = review ? [] : eliminated(s, q.id); // review is a clean read-only view
+    const elim = eliminated(s, q.id);
     const items = q.choices.map((c, i) => {
       const selected = multi ? (a || []).includes(i) : a === i;
       const out = elim.includes(i);
@@ -1177,7 +1226,7 @@
       }
       const id = `c-${q.id}-${i}`;
       // The eliminate button sits beside the label (not inside it), so clicking it never selects the choice.
-      const elimBtn = review ? '' : `<button type="button" class="elim-btn${out ? ' undo' : ''}" id="x-${q.id}-${i}" data-action="eliminate" data-i="${i}"
+      const elimBtn = `<button type="button" class="elim-btn${out ? ' undo' : ''}" id="x-${q.id}-${i}" data-action="eliminate" data-i="${i}"
           aria-label="${out ? 'Undo elimination of' : 'Eliminate'} option ${letter(i)}" title="${out ? 'Undo elimination' : `Eliminate option ${letter(i)}`}">${out ? 'Undo' : `<span class="elim-mark" aria-hidden="true">${letter(i)}</span>`}</button>`;
       return `<li><label class="choice ${cls}${out ? ' eliminated' : ''}" for="${id}">
         <input type="${multi ? 'checkbox' : 'radio'}" id="${id}" name="${q.id}" value="${i}" data-qid="${q.id}" ${selected ? 'checked' : ''} ${revealed ? 'disabled' : ''}>
@@ -1195,7 +1244,9 @@
     else return '<p>Solution not yet available.</p>';
     const alts = !isMC(q) && key.accepted.length > 1
       ? `<div class="alts">Also accepted: ${key.accepted.slice(1).map((x) => `<code>${esc(x)}</code>`).join(', ')}</div>` : '';
-    const expl = key.explanation ? `<div class="rich">${rich(key.explanation)}</div>` : '<div class="alts">Explanation not yet available.</div>';
+    const expl = key.explanation
+      ? `<div class="expl-label">Explanation <span>written for this site, not official</span></div><div class="rich">${rich(key.explanation)}</div>`
+      : '<div class="alts">Explanation not yet available.</div>';
     return `<div class="title">Official answer</div><pre>${esc(ans)}</pre>${alts}${expl}`;
   }
 
@@ -1221,31 +1272,87 @@
     return parts.join('');
   }
 
-  // After an exam is submitted: the part's result plus the official answer and explanation.
-  function renderReview(q, s) {
-    const st = examStatus(s, q.id);
-    const head = {
+  // ── Review (right pane): submitted answer, current review answer, official answer ──
+  const STATUS_LABEL = { correct: 'Correct', incorrect: 'Incorrect', skipped: 'Unanswered', staff: 'Graded by Course Staff' };
+  const badgeCls = (st) => (st === 'skipped' ? 'skipped' : st === 'staff' ? 'ungraded' : st);
+  function sameAnswer(x, y) {
+    const blank = (v) => v === undefined || v === null || (Array.isArray(v) ? !v.length : String(v).trim() === '');
+    if (blank(x) || blank(y)) return blank(x) && blank(y);
+    return JSON.stringify(x) === JSON.stringify(y);
+  }
+  // A submitted choice answer, drawn without inputs (so it can't clash with the editable copy on the left).
+  function submittedChoicesHTML(q, a) {
+    const key = ANSWER_KEY[q.id];
+    const multi = q.type === 'multi_select';
+    const correctSet = new Set(multi ? key.correct : [key.correct]);
+    const ans = a.answers[q.id];
+    return `<ul class="choices static ${q.mono ? 'mono' : ''}" aria-label="Submitted answer for part ${esc(q.label)}">${q.choices.map((c, i) => {
+      const sel = multi ? (ans || []).includes(i) : ans === i;
+      const cls = correctSet.has(i) ? (sel || !multi ? 'correct' : 'missed') : sel ? 'wrong' : '';
+      return `<li><span class="choice ${cls}"><span class="bubble ${multi ? 'box' : ''}${sel ? ' on' : ''}" aria-hidden="true"></span><span class="txt">${esc(c)}</span>${sel ? '<span class="sr-only"> (your choice)</span>' : ''}</span></li>`;
+    }).join('')}</ul>`;
+  }
+  function answerText(q, v) {
+    if (isMC(q)) {
+      const picks = q.type === 'multi_select' ? (v || []) : Number.isInteger(v) ? [v] : [];
+      return picks.length ? picks.map((i) => `${letter(i)}. ${q.choices[i]}`).join('\n') : '';
+    }
+    return v ? String(v) : '';
+  }
+  function renderReviewPanel(q, a, w) {
+    const st = statusIn(a, q.id);
+    const pts = hasPoints(q) ? `${fmtPts(q.points)} pt` : 'points not published';
+    const sub = isMC(q) ? submittedChoicesHTML(q, a)
+      : hasAnswer(a, q.id) ? `<pre class="rv-pre">${esc(a.answers[q.id])}</pre>` : '<p class="rv-none">No answer submitted.</p>';
+    const changed = !sameAnswer(w.answers[q.id], a.answers[q.id]);
+    const now = answerText(q, w.answers[q.id]);
+    // Learning feedback on the review answer only; it never changes the stored grade.
+    const match = changed && now && autoGradable(q) ? (examStatus(w, q.id) === 'correct' ? ' · matches the official answer' : ' · doesn’t match the official answer') : '';
+    const current = changed
+      ? `<div class="rv-block rv-current"><div class="rv-k">Current review answer <span>(not scored${match})</span></div>
+          ${now ? `<pre class="rv-pre">${esc(now)}</pre>` : '<p class="rv-none">Cleared.</p>'}
+          <button class="btn btn-sm" data-action="reset-answer" data-q="${q.id}">Reset to submitted answer</button></div>`
+      : '<p class="rv-same">Your review answer is the same as what you submitted.</p>';
+    const verdict = {
       correct: '<div class="verdict">✓ Correct</div>',
       incorrect: '<div class="verdict">✗ Incorrect</div>',
       skipped: '<div class="verdict">Unanswered</div>',
       staff: '<div class="verdict">Graded by Course Staff</div><p class="staff-note">This question requires manual grading and will not be graded on this platform.</p>',
     }[st];
-    const cls = { correct: 'good', incorrect: 'bad', skipped: 'info', staff: 'info' }[st];
-    return `<div class="feedback ${cls}">${head}${officialAnswerHTML(q)}</div>`;
+    return `<div class="rv-part" id="rv-${q.id}">
+      <p class="q-head"><span class="lbl">${esc(q.label)}</span>${inline(q.prompt)}
+        <span class="part-meta">${pts} · <span class="badge ${badgeCls(st)}">${STATUS_LABEL[st]}</span></span></p>
+      <div class="rv-block"><div class="rv-k">Your submitted answer</div>${sub}</div>
+      ${current}
+      <div class="feedback ${{ correct: 'good', incorrect: 'bad', skipped: 'info', staff: 'info' }[st]}">${verdict}${officialAnswerHTML(q)}</div>
+    </div>`;
+  }
+  function renderReviewRight(g, w) {
+    const a = attemptById(w.reviewOf);
+    return `<section class="question review-right" aria-label="Question ${w.index + 1}: submitted and official answers">
+      <div class="q-bar"><span class="q-num">${w.index + 1}</span><span class="rv-title">Submitted &amp; official answers</span>
+        <span class="qtype">${g.ids.length > 1 ? `${g.ids.length} parts` : TYPE_LABEL[QMAP[g.ids[0]].type]}</span></div>
+      ${g.ids.map((id) => renderReviewPanel(QMAP[id], a, w)).join('<hr class="part-sep">')}
+    </section>`;
+  }
+  // The editable copy (left pane, under the problem): the normal part renderer, without feedback.
+  function renderReviewWork(g, w) {
+    return `<div class="rw-head"><h3>Your review workspace</h3>
+        <p class="hint">Try the question again here. Changes are saved separately; your submitted answers and score don’t change.</p></div>
+      ${g.ids.map((id) => renderPart(QMAP[id], w)).join('<hr class="part-sep">')}`;
   }
 
   function renderPart(q, s) {
     const id = q.id;
     const exam = isExam(s);
-    const review = locked(s);
-    const revealed = review || (!exam && !!s.revealed[id]);
+    const revealed = !exam && !!s.revealed[id];
     const pts = q.points === null || q.points === undefined ? '' : `<span class="pts">(${q.points.toFixed(1)} pt)</span>`;
     let response;
     if (isMC(q)) {
       response = renderChoices(q, s);
     } else {
       response = `<div class="answer-box ${q.type === 'code' ? 'code' : ''}"><textarea id="ta-${id}" data-qid="${id}" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Your answer for part ${esc(q.label)}" ${revealed ? 'readonly' : ''} placeholder="${q.type === 'code' ? 'Write your code here…' : 'Type your answer…'}">${esc(s.answers[id] || '')}</textarea></div>
-        ${exam ? (q.type === 'code' && !review ? '<p class="selfcheck-note">Code responses are saved with your exam. They are not graded on this platform.</p>' : '')
+        ${exam ? (q.type === 'code' && !isReview(s) ? '<p class="selfcheck-note">Code responses are saved with your exam. They are not graded on this platform.</p>' : '')
           : q.type === 'code' ? '<p class="selfcheck-note">Self-check: code responses are saved but not auto-graded. Show the solution to compare.</p>' : '<p class="selfcheck-note">Checked against the official answer, ignoring spaces and quote style.</p>'}`;
     }
     const confirming = ui.confirmReveal === id;
@@ -1262,7 +1369,7 @@
         <span class="part-meta">${exam && q.type === 'code' ? 'Code response' : TYPE_LABEL[q.type]} · <span class="diff-${q.difficulty}">${q.difficulty}</span></span></p>
       ${response}
       ${actions}
-      ${review ? renderReview(q, s) : exam ? '' : renderFeedback(q, s)}
+      ${exam ? '' : renderFeedback(q, s)}
     </div>`;
   }
 
@@ -1271,7 +1378,7 @@
     const done = g.ids.filter((id) => hasAnswer(s, id)).length;
     return `<section class="question" aria-label="Question ${s.index + 1}">
       <div class="q-bar"><span class="q-num">${s.index + 1}</span>
-        ${locked(s) ? `<span class="mark-btn static">${marked ? 'Marked for review' : ''}</span>` : `<button class="mark-btn" data-action="mark" aria-pressed="${marked}" title="Mark for review (M)">
+        ${isReview(s) ? '' : `<button class="mark-btn" data-action="mark" aria-pressed="${marked}" title="Mark for review (M)">
           <svg viewBox="0 0 16 20" aria-hidden="true"><path d="M2 1.5h12v17l-6-4.5-6 4.5z" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
           ${marked ? 'Marked for Review' : 'Mark for Review'}</button>`}
         <span class="qtype">${g.ids.length > 1 ? `${g.ids.length} parts · ${done} answered` : TYPE_LABEL[QMAP[g.ids[0]].type]}</span></div>
@@ -1303,7 +1410,7 @@
       <p class="nav-sub">${esc(s.title)}</p>
       <div class="legend"><span><span class="sw cur"></span>Current</span><span><span class="sw"></span>Unanswered</span><span><span class="sw part"></span>Partly answered</span><span><span class="sw ans"></span>Answered</span><span><span class="sw mk"></span>For Review</span></div>
       <div class="nav-grid">${cells}</div>
-      ${locked(s) ? '' : `<div class="go-review">${isExam(s) ? '<button class="btn" data-action="submit-exam">Submit Exam</button>' : '<button class="btn" data-action="finish">Go to Review Page</button>'}</div>`}
+      ${isReview(s) ? '' : `<div class="go-review">${isExam(s) ? '<button class="btn" data-action="submit-exam">Submit Exam</button>' : '<button class="btn" data-action="finish">Go to Review Page</button>'}</div>`}
     </div>`;
   }
 
@@ -1311,7 +1418,7 @@
     const t = s.timer;
     const exam = isExam(s);
     let timer;
-    if (locked(s)) timer = `<div class="timer"><span class="hint">Submitted ${esc(when(s.finishedAt))}</span></div>`;
+    if (isReview(s)) { const at = attemptById(s.reviewOf); timer = `<div class="timer"><span class="hint">Submitted ${esc(when(at.finishedAt))}</span></div>`; }
     else if (t) {
       const left = timeLeft(t);
       // Exams can't be paused or reset here; only Save & Leave pauses the clock.
@@ -1323,17 +1430,19 @@
           <button class="btn btn-sm btn-ghost${exam ? '' : ' opt'}" data-action="hide-clock">${ui.hideClock ? 'Show' : 'Hide'}</button>
         </span></div>`;
     } else timer = `<div class="timer"><span class="hint">${exam ? 'Untimed' : 'Timer off'}</span></div>`;
-    const directions = exam ? `<p>Answer every part; nothing is graded until you <b>Submit Exam</b>, and no answers or solutions are shown before then. You can eliminate choices, mark questions for review, and jump between questions with the navigator.</p>
+    const directions = isReview(s) ? `<p>This is your review workspace for a submitted exam. The left side has the question and an editable copy of your answers; the right side shows what you submitted, the official answer and an explanation.</p>
+        <p>Edits are saved in this browser and kept separate from the submission. <b>Reset to submitted answer</b> (per part) and <b>Reset code to submitted version</b> undo them.</p>`
+      : exam ? `<p>Answer every part; nothing is graded until you <b>Submit Exam</b>, and no answers or solutions are shown before then. You can eliminate choices, mark questions for review, and jump between questions with the navigator.</p>
         <p><b>Save &amp; Leave</b> pauses the timer and keeps everything (answers, scratch code, annotations, eliminations, marks) for later.${t ? ' When the timer reaches 0:00 the exam is submitted automatically.' : ''}</p>`
       : '<p>All parts of a question are shown together on the right. Your answers fill the matching blanks in the code on the left. Use <b>Check Answer</b> to grade a part, or <b>Show Solution</b> to see the official answer.</p>';
     return `<div class="left"><div class="brand">${exam ? 'CS 61A Exam' : 'CS 61A Practice'}</div>
-        <div class="set-name">${esc(s.title)} · ${exam ? `<span class="mode-tag">${locked(s) ? 'Review' : 'Exam'}</span> · ` : ''}<button class="directions-btn" data-action="directions" aria-expanded="${ui.dirOpen}">Directions ▾</button></div></div>
+        <div class="set-name">${esc(s.title)} · ${exam ? `<span class="mode-tag">${isReview(s) ? 'Review' : 'Exam'}</span> · ` : ''}<button class="directions-btn" data-action="directions" aria-expanded="${ui.dirOpen}">Directions ▾</button></div></div>
       <div class="center"><span class="progress">Q ${s.index + 1} / ${s.groups.length}</span></div>
       ${timer}
       ${ui.dirOpen ? `<div class="directions" role="dialog" aria-label="Directions"><p style="margin-top:0">${esc(BUBBLE_NOTE)}</p>${directions}<p>Annotate the problem with the toolbar on the left: highlighter, red pen, eraser, undo/redo.</p><p style="margin-bottom:0">Keyboard: <code>←</code>/<code>→</code> previous/next question, <code>M</code> mark for review, <code>Esc</code> closes the question navigator.</p></div>` : ''}`;
   }
   function bannerHTML(s) {
-    if (locked(s)) return `<div class="review-banner" role="note"><span>Reviewing a submitted exam. Answers can’t be changed.</span><button class="btn btn-sm" data-action="exam-results">Back to results</button></div>`;
+    if (isReview(s)) return `<div class="review-banner" role="note"><span>Review workspace: edit answers and code freely. Your submitted answers and score stay as they were.</span><button class="btn btn-sm" data-action="exam-results">Back to results</button></div>`;
     if (isExam(s)) return '';
     return s.timer && s.timer.expired
       ? `<div class="expired-banner" role="alert"><span>⏰ Time’s up. Your answers are saved, so you can keep reviewing or finish.</span><button class="btn btn-sm" data-action="finish">Finish set</button></div>` : '';
@@ -1341,7 +1450,7 @@
   function footerHTML(s) {
     const isLast = s.index === s.groups.length - 1;
     const exam = isExam(s);
-    const review = locked(s);
+    const review = isReview(s);
     // Exams: Next stops at the last question; only Submit Exam ends the attempt.
     const right = exam
       ? `<button class="btn btn-primary" data-action="prev" ${s.index === 0 ? 'disabled' : ''}>Back</button>
@@ -1409,58 +1518,152 @@
     </main>`;
   }
 
-  // Score report for a submitted exam attempt. Only a fully gradable attempt gets a "Final Score".
-  function renderExamResults(a) {
-    const sc = examScore(a);
-    const label = { correct: 'Correct', incorrect: 'Incorrect', skipped: 'Unanswered', staff: 'Graded by Course Staff' };
-    const rows = a.groups.map((g, gi) => g.ids.map((id) => {
+  // ── Learning insights (per attempt; static data only, no generated content) ──
+  // Topics come only from INCORRECT, auto-graded parts. Unanswered and staff-graded parts are never treated as
+  // evidence of a misunderstanding. A part's own tags are used; if a part had none, its group's tags are used
+  // and the topic is marked as a broader association.
+  function insightsFor(a) {
+    const missed = a.ids.filter((id) => statusIn(a, id) === 'incorrect' && autoGradable(QMAP[id]));
+    const tally = {};
+    missed.forEach((id) => {
       const q = QMAP[id];
-      const pr = PROBLEMS[q.problem];
-      const st = examStatus(a, id);
-      const pts = st === 'staff' ? '—' : hasPoints(q) ? `${fmtPts(st === 'correct' ? q.points : 0)} / ${fmtPts(q.points)}` : 'n/a';
-      return `<tr>
-        <th scope="row">${gi + 1}${g.ids.length > 1 ? ` <span class="sub">${esc(q.label)}</span>` : ''}</th>
-        <td>${esc(shortExam(pr.exam))} Q${esc(pr.number)}<small>${esc(pr.title)}</small></td>
-        <td>${q.topics.map((t) => esc(topicLabel(t))).join(', ')}</td>
-        <td class="num">${pts}</td>
-        <td><span class="badge ${st === 'skipped' ? 'skipped' : st === 'staff' ? 'ungraded' : st}">${label[st]}</span></td>
-        <td><button class="btn btn-sm" data-action="exam-review" data-i="${gi}" data-q="${id}" aria-label="Review question ${gi + 1} ${esc(q.label)}">Review</button></td>
-      </tr>`;
-    }).join('')).join('');
-    const notes = [];
-    if (sc.staff) notes.push(`${sc.staff} part${sc.staff === 1 ? ' is' : 's are'} graded by course staff and not scored here`);
-    if (sc.unknown) notes.push(`${sc.unknown} part${sc.unknown === 1 ? ' has' : 's have'} no published point value`);
-    const scoreNote = sc.partial
-      ? `Partial: counts only parts graded on this platform with known point values. ${notes.join('; ')}.`
-      : 'Every part was graded automatically and every point value is known.';
+      const own = q.topics && q.topics.length;
+      (own ? q.topics : groupTopics(q.problem)).forEach((t) => {
+        tally[t] = tally[t] || { id: t, parts: [], broad: false };
+        tally[t].parts.push(id);
+        if (!own) tally[t].broad = true;
+      });
+    });
+    const order = Object.fromEntries(TOPICS.map((t, i) => [t.id, i]));
+    const topics = Object.values(tally).sort((x, y) => y.parts.length - x.parts.length || order[x.id] - order[y.id]);
+    const unanswered = a.ids.filter((id) => statusIn(a, id) === 'skipped').length;
+    return { missed, topics, unanswered, staff: a.ids.filter((id) => statusIn(a, id) === 'staff').length };
+  }
+  // Up to `n` existing question groups tagged with the topic. Groups outside this attempt come first; ranking is
+  // deterministic: more parts tagged with the topic first, then question-bank order. A group is never repeated.
+  function recommend(topic, a, used, n) {
+    const inAttempt = new Set(a.groups.map((g) => g.pid));
+    const rank = Object.keys(PROBLEMS)
+      .map((pid, i) => ({ pid, i, hits: partsOf(pid).filter((q) => q.topics.includes(topic)).length }))
+      .filter((r) => r.hits && !used.has(r.pid))
+      .sort((x, y) => x.hits === y.hits ? x.i - y.i : y.hits - x.hits);
+    const outside = rank.filter((r) => !inAttempt.has(r.pid));
+    // Questions from this exam only fill in when the bank has no other question on the topic.
+    const pick = (outside.length ? outside : rank).slice(0, n);
+    pick.forEach((r) => used.add(r.pid));
+    return pick.map((r) => ({ pid: r.pid, fromAttempt: inAttempt.has(r.pid) }));
+  }
+  function guideHTML(topic) {
+    const concepts = GUIDES[topic];
+    if (!concepts || !concepts.length) return '<p class="hint">No study guide for this topic yet. Review the official answers and explanations for the parts you missed.</p>';
+    return concepts.map((c) => `<div class="concept">
+        <h5>${esc(c.title)}</h5>
+        ${rich(c.body)}
+        ${c.code ? `<pre class="concept-code"><code>${esc(c.code)}</code></pre>` : ''}
+        ${c.pitfall ? `<p class="pitfall"><b>Common mistake / exam tip:</b> ${inline(c.pitfall)}</p>` : ''}
+      </div>`).join('');
+  }
+  function renderInsights(a) {
+    const ins = insightsFor(a);
+    const ignored = [ins.unanswered ? `${ins.unanswered} unanswered part${ins.unanswered === 1 ? '' : 's'}` : '', ins.staff ? `${ins.staff} part${ins.staff === 1 ? '' : 's'} graded by course staff` : ''].filter(Boolean).join(' and ');
+    const ignoredNote = ignored ? `<p class="hint">${ignored} ${ins.unanswered + ins.staff === 1 ? 'isn’t' : 'aren’t'} used for these suggestions.</p>` : '';
+    if (!ins.topics.length) {
+      return `<section class="insights" id="insights" aria-labelledby="insights-h" tabindex="-1">
+        <h2 id="insights-h">Learning insights</h2>
+        <p class="insight-empty">${a.ids.some((id) => autoGradable(QMAP[id]) && hasAnswer(a, id))
+          ? 'No automatically graded part was answered incorrectly, so there are no topics to flag from this attempt.'
+          : 'There are no incorrectly answered, automatically graded parts in this attempt, so there are no topics to flag.'}</p>
+        ${ignoredNote}
+      </section>`;
+    }
+    const used = new Set();
+    const topicName = (t) => esc(topicLabel(t.id));
+    const chips = ins.topics.map((t) => `<li><b>${topicName(t)}</b> <span class="hint">${t.parts.length} missed part${t.parts.length === 1 ? '' : 's'}${t.broad ? ' · broader association (question-level tag)' : ''}</span></li>`).join('');
+    const guides = ins.topics.map((t) => {
+      const n = (GUIDES[t.id] || []).length;
+      return `<details class="guide"><summary><span class="g-name">${topicName(t)}</span><span class="g-meta">${n ? `${n} concepts` : 'no guide yet'}</span></summary>
+        <div class="guide-body">${guideHTML(t.id)}</div></details>`;
+    }).join('');
+    const recs = ins.topics.map((t) => {
+      const list = recommend(t.id, a, used, 3);
+      const rows = list.map((r) => {
+        const pr = PROBLEMS[r.pid];
+        return `<li class="rec-row"><span class="rec-txt"><b>${esc(pr.title)}</b> <span class="hint">${esc(EXAMS[pr.exam].label)} · Q${esc(pr.number)} · ${partsOf(r.pid).length} part${partsOf(r.pid).length === 1 ? '' : 's'}${r.fromAttempt ? ' · also in this exam' : ''}</span></span>
+          <button class="btn btn-sm" data-action="practice-group" data-pid="${r.pid}" aria-label="Practice ${esc(pr.title)} (${esc(shortExam(pr.exam))} Q${esc(pr.number)}) in Practice Mode">Practice</button></li>`;
+      }).join('');
+      return `<div class="rec-topic"><h5>${topicName(t)}</h5>${rows ? `<ul class="rec-list">${rows}</ul>` : '<p class="hint">No other questions in the bank cover this topic yet.</p>'}</div>`;
+    }).join('');
+    return `<section class="insights" id="insights" aria-labelledby="insights-h" tabindex="-1">
+      <h2 id="insights-h">Learning insights</h2>
+      <p class="hint">Based on the ${ins.missed.length} automatically graded part${ins.missed.length === 1 ? '' : 's'} you answered incorrectly. A missed part points to concepts worth reviewing; it doesn’t prove you don’t know them.</p>
+      ${ignoredNote}
+      <h3>1. Topics to review</h3>
+      <ul class="topic-list">${chips}</ul>
+      <h3>2. Concepts worth reviewing</h3>
+      <p class="hint">Short study guides written for this site (not official course material). Open a topic to read it.</p>
+      ${guides}
+      <h3>3. Recommended practice questions</h3>
+      <p class="hint">Real questions from the bank that share a topic with what you missed, preferring ones that weren’t in this exam. <b>Practice</b> opens the question in a new Practice Mode set; this attempt isn’t changed.</p>
+      ${recs}
+    </section>`;
+  }
+
+  // Results for a submitted attempt, read from the grades and score frozen at submission.
+  function renderExamResults(a) {
+    const sc = a.score;
+    const rowsFor = (g, gi) => g.ids.map((id) => {
+      const q = QMAP[id];
+      const st = statusIn(a, id);
+      const pts = !autoGradable(q) ? '—' : hasPoints(q) ? `${fmtPts(st === 'correct' ? q.points : 0)} / ${fmtPts(q.points)} pts` : 'points n/a';
+      return `<li class="part-row">
+        <span class="pr-lbl">${esc(q.label)}</span>
+        <span class="pr-topics">${q.topics.map((t) => esc(topicLabel(t))).join(', ')}</span>
+        <span class="pr-pts">${pts}</span>
+        <span class="badge ${badgeCls(st)}">${STATUS_LABEL[st]}</span>
+        <button class="btn btn-sm" data-action="exam-review" data-i="${gi}" data-q="${id}" aria-label="Review question ${gi + 1} part ${esc(q.label)}">Review</button>
+      </li>`;
+    }).join('');
+    const groups = a.groups.map((g, gi) => {
+      const pr = PROBLEMS[g.pid];
+      const c = { correct: 0, incorrect: 0, skipped: 0, staff: 0 };
+      g.ids.forEach((id) => { c[statusIn(a, id)]++; });
+      const summary = ['correct', 'incorrect', 'skipped', 'staff'].filter((k) => c[k]).map((k) => `${c[k]} ${STATUS_LABEL[k].toLowerCase()}`).join(' · ');
+      return `<details class="rq-group"${c.incorrect ? ' open' : ''}>
+        <summary><span class="rq-n">${gi + 1}</span><span class="rq-title">${esc(pr.title)}<small>${esc(EXAMS[pr.exam].label)} · Q${esc(pr.number)} · ${g.ids.length} part${g.ids.length === 1 ? '' : 's'}</small></span><span class="rq-sum">${summary}</span></summary>
+        <ul class="part-rows">${rowsFor(g, gi)}</ul></details>`;
+    }).join('');
+    const excluded = [sc.staff ? `${sc.staff} part${sc.staff === 1 ? '' : 's'} graded by course staff` : '', sc.unknown ? `${sc.unknown} part${sc.unknown === 1 ? '' : 's'} without a published point value` : ''].filter(Boolean);
+    const scoreMain = sc.auto
+      ? `<div class="k">Automatically graded${sc.partial ? ' · partial score' : ''}</div>
+         <div class="v">${fmtPts(sc.earned)}<span> / ${fmtPts(sc.possible)} pts</span></div>
+         <p class="hint">${excluded.length ? `Not included: ${excluded.join(' and ')}.` : 'Every part of this exam was graded automatically.'}</p>`
+      : `<div class="k">Automatically graded</div><div class="v none">No automatically graded questions</div>
+         <p class="hint">${excluded.length ? `This attempt has ${excluded.join(' and ')}, so there is no automatic score.` : 'Nothing in this attempt can be graded automatically.'}</p>`;
     return `<main class="results exam-results">
       <p class="eyebrow">Exam results</p>
       <h1>${esc(a.title)}</h1>
-      <p class="hint">${kindLabel(a)} · Submitted ${esc(when(a.finishedAt))}${a.autoSubmitted ? ' · <b>Time ran out, so the exam was submitted automatically</b>' : ''}</p>
+      <p class="hint">${kindLabel(a)} · Submitted ${esc(when(a.finishedAt))} · ${fmt(activeMs(a))} spent${a.timer ? ` of ${fmt(a.timer.durationMs)}` : ' (untimed)'}${a.autoSubmitted ? ' · <b>Time ran out, so the exam was submitted automatically</b>' : ''}</p>
       <section class="score-card" aria-label="Score">
-        <div class="score-main">
-          <div class="k">${sc.partial ? 'Partial Score' : 'Final Score'}</div>
-          <div class="v">${fmtPts(sc.earned)}<span> / ${fmtPts(sc.possible)}</span></div>
-          <p class="hint">${esc(scoreNote)}</p>
-        </div>
+        <div class="score-main">${scoreMain}</div>
         <div class="stats">
           <div class="stat good"><div class="v">${sc.counts.correct}</div><div class="k">Correct parts</div></div>
           <div class="stat bad"><div class="v">${sc.counts.incorrect}</div><div class="k">Incorrect parts</div></div>
-          <div class="stat"><div class="v">${sc.counts.staff}</div><div class="k">Graded by course staff</div></div>
           <div class="stat"><div class="v">${sc.counts.skipped}</div><div class="k">Unanswered parts</div></div>
-          <div class="stat"><div class="v">${fmt(activeMs(a))}</div><div class="k">Time spent${a.timer ? ` of ${fmt(a.timer.durationMs)}` : ' (untimed)'}</div></div>
+          <div class="stat"><div class="v">${sc.counts.staff}</div><div class="k">Graded by Course Staff</div></div>
         </div>
       </section>
+      <p class="disclaimer-strong">All grades on this platform are for practice purposes only and do not predict your actual exam scores.</p>
       <div class="actions">
-        <button class="btn btn-primary" data-action="exam-review" data-i="0">Review answers</button>
+        <button class="btn btn-primary" data-action="exam-review" data-i="0">Review Questions</button>
+        <button class="btn" data-action="goto-insights">Learning Insights</button>
         <button class="btn" data-action="retake">Retake this exam</button>
         <button class="btn" data-action="home">Back to home</button>
       </div>
-      <div class="table-wrap"><table class="result-table">
-        <thead><tr><th scope="col">Question</th><th scope="col">Original exam</th><th scope="col">Topic</th><th scope="col" class="num">Points</th><th scope="col">Your result</th><th scope="col"><span class="sr-only">Review</span></th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table></div>
-      <p class="hint">Choices and short answers are graded automatically against the official answer and its accepted equivalents (ignoring spaces and quote style). Code-writing parts are left for course staff; nothing is sent anywhere.</p>
+      <h2 class="rq-h">Questions</h2>
+      <p class="hint">Counts are by part. Open a question to see its parts, then <b>Review</b> to work through it again next to the official answer.</p>
+      <div class="rq-list">${groups}</div>
+      ${renderInsights(a)}
+      <p class="hint">Choices and short answers are graded automatically against the official answer and its accepted equivalents (ignoring spaces and quote style). Code-writing parts are not graded on this platform, and nothing is sent anywhere.</p>
     </main>`;
   }
 
@@ -1497,12 +1700,14 @@
       }
       const right = document.getElementById('pane-right');
       const sameGroup = right.dataset.group === g.pid;
-      right.innerHTML = renderRight(g, s);
+      right.innerHTML = isReview(s) ? renderReviewRight(g, s) : renderRight(g, s);
       right.dataset.group = g.pid;
       if (!sameGroup) right.scrollTop = 0;
       if (leftPid !== g.pid) buildLeft(g);
+      const work = document.getElementById('review-work'); // review: the editable answers live under the problem
+      if (work) work.innerHTML = renderReviewWork(g, s);
       fillBlanks(editors[g.pid]);
-      document.title = `Q${s.index + 1} · ${isExam(s) ? (locked(s) ? 'Exam review' : 'Exam') : 'CS 61A Practice'}`;
+      document.title = `Q${s.index + 1} · ${isExam(s) ? (isReview(s) ? 'Exam review' : 'Exam') : 'CS 61A Practice'}`;
     } else {
       detachEditors();
       if (leftObserver) leftObserver.disconnect();
@@ -1534,11 +1739,10 @@
     announce(`Question ${s.index + 1} of ${s.groups.length}. ${g.ids.length} part${g.ids.length === 1 ? '' : 's'}.`);
   }
   // Scroll the right pane to the part linked to a code blank and focus its first input.
+  // (In a review workspace the editable parts are in the left pane, so parts are looked up anywhere on the page.)
   function focusPart(blank, qid) {
-    const right = document.getElementById('pane-right');
-    if (!right) return;
     const el = qid ? document.getElementById(`part-${qid}`)
-      : Array.from(right.querySelectorAll('.part')).find((p) => p.dataset.blank === blank);
+      : Array.from(app.querySelectorAll('.part')).find((p) => p.dataset.blank === blank);
     if (!el) return;
     el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     const input = el.querySelector('input:not(:disabled), textarea');
@@ -1548,7 +1752,7 @@
   function setActivePart(el) {
     const blank = el ? el.dataset.blank : '';
     ui.activeBlank = blank || null;
-    document.querySelectorAll('#pane-right .part').forEach((p) => p.classList.toggle('active', p === el));
+    app.querySelectorAll('.part').forEach((p) => p.classList.toggle('active', p === el));
     setCurrentBlank(blank);
   }
 
@@ -1611,12 +1815,40 @@
       case 'save-leave': saveAndLeave(); return;
       case 'submit-exam': if (!store.exam || !confirmSubmit()) return; submitExam(false); return;
       case 'exam-results': ui.screen = 'exam-results'; ui.navOpen = false; ui.dirOpen = false; window.scrollTo(0, 0); break;
-      case 'exam-review': {
-        const at = attemptById(ui.attemptId);
+      case 'exam-review': { // opens the attempt's review workspace (never the attempt itself)
+        const w = workspaceFor(ui.attemptId);
         ui.screen = 'practice';
-        at.index = Number(btn.dataset.i);
+        w.index = Number(btn.dataset.i);
         save(); render();
-        if (btn.dataset.q) focusPart(null, btn.dataset.q);
+        if (btn.dataset.q) {
+          focusPart(null, btn.dataset.q);
+          const panel = document.getElementById(`rv-${btn.dataset.q}`);
+          if (panel) panel.scrollIntoView({ block: 'start' });
+        }
+        return;
+      }
+      case 'goto-insights': {
+        const el = document.getElementById('insights');
+        if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); el.focus({ preventScroll: true }); }
+        return;
+      }
+      case 'reset-answer': { // review workspace: one part back to exactly what was submitted
+        const at = attemptById(s.reviewOf);
+        const id = btn.dataset.q;
+        if (!at || !isReview(s)) return;
+        const copy = (x) => (x === undefined ? undefined : JSON.parse(JSON.stringify(x)));
+        if (at.answers[id] === undefined) delete s.answers[id]; else s.answers[id] = copy(at.answers[id]);
+        if (at.eliminated[id] === undefined) delete s.eliminated[id]; else s.eliminated[id] = copy(at.eliminated[id]);
+        announce(`Part ${QMAP[id].label} reset to your submitted answer.`);
+        break;
+      }
+      case 'practice-group': { // recommendation: a new practice set with just this question group (all its parts)
+        const pid = btn.dataset.pid;
+        if (!PROBLEMS[pid]) return;
+        if (store.session && !store.session.finished && !confirm('Practicing this question replaces your unfinished practice set. Continue?')) return;
+        const pr = PROBLEMS[pid];
+        p.mode = 'practice';
+        newSession(partsOf(pid).map((q) => q.id), `Practice: ${pr.title} (${shortExam(pr.exam)} Q${pr.number})`);
         return;
       }
       case 'retake': {
@@ -1643,7 +1875,7 @@
         focusEl(ui.navOpen ? `nav-${curGroup().pid}` : 'nav-toggle');
         return;
       case 'directions': ui.dirOpen = !ui.dirOpen; ui.navOpen = false; break;
-      case 'mark': { if (locked(s)) return; const pid = curGroup().pid; if (s.marked[pid]) delete s.marked[pid]; else s.marked[pid] = true; break; }
+      case 'mark': { if (isReview(s)) return; const pid = curGroup().pid; if (s.marked[pid]) delete s.marked[pid]; else s.marked[pid] = true; break; }
       case 'check': {
         if (isExam(s)) return; // no grading before an exam is submitted
         const ans = s.answers[q.id];
@@ -1673,8 +1905,10 @@
       case 'hide-clock': ui.hideClock = !ui.hideClock; break;
       case 'reset-code':
         if (locked(s)) return;
-        if (!confirm('Reset the code to the original? Your typed notes in the code (and code highlights) will be erased. Your answers stay.')) return;
-        resetEditor(curGroup().pid); announce('Code reset to the original.'); return;
+        if (!confirm(isReview(s)
+          ? 'Reset the code to the version you submitted? Your edits to the code since then (and code highlights) will be erased. Your answers stay.'
+          : 'Reset the code to the original? Your typed notes in the code (and code highlights) will be erased. Your answers stay.')) return;
+        resetEditor(curGroup().pid); announce(isReview(s) ? 'Code reset to the submitted version.' : 'Code reset to the original.'); return;
       case 'finish': {
         if (isExam(s)) return;
         const un = s.ids.filter((id) => !hasAnswer(s, id)).length;
@@ -1726,7 +1960,7 @@
 
   // Track which part is active so its code blank is highlighted.
   app.addEventListener('focusin', (e) => {
-    const part = e.target.closest && e.target.closest('#pane-right .part');
+    const part = e.target.closest && e.target.closest('.part');
     if (part && !part.classList.contains('active')) setActivePart(part);
   });
 
@@ -1804,6 +2038,11 @@
     delete s.selfGrade[qid];
     saveSoon();
     if (leftPid) fillBlanks(editors[leftPid]); // typed answers show in the code as you type
+    if (isReview(s)) { // keep the "current review answer" panel in step without touching the box being typed in
+      const right = document.getElementById('pane-right');
+      if (right) right.innerHTML = renderReviewRight(curGroup(), s);
+      return;
+    }
     if (hadState) render(); // refresh Check button / stale feedback
   });
 
@@ -1828,7 +2067,7 @@
     }
     if (e.key === 'ArrowRight') { if (s.index < s.groups.length - 1) go(s.index + 1); e.preventDefault(); }
     else if (e.key === 'ArrowLeft') { if (s.index > 0) go(s.index - 1); e.preventDefault(); }
-    else if ((e.key === 'm' || e.key === 'M') && !locked(s)) {
+    else if ((e.key === 'm' || e.key === 'M') && !isReview(s)) {
       const pid = curGroup().pid;
       if (s.marked[pid]) delete s.marked[pid]; else s.marked[pid] = true;
       save(); render();
@@ -1844,6 +2083,9 @@
     }
   });
   window.addEventListener('beforeunload', save);
+
+  // Attempts submitted before grades were frozen get their snapshot now, once; after that it never changes.
+  store.attempts.forEach((a) => { if (!a.graded || !a.score || a.score.v !== 2) Object.assign(a, gradeAttempt(a)); });
 
   // An exam that was never explicitly left (refresh, crash, closed tab) reopens straight into the exam,
   // with its clock having kept running; one whose time ran out meanwhile is submitted as of expiry.
