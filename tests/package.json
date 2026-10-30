@@ -1,0 +1,12 @@
+{
+  "name": "cs61a-practice-tests",
+  "private": true,
+  "description": "Browser regression tests for the CS 61A practice app (the app itself has no build step or dependencies).",
+  "scripts": {
+    "test": "node run_all.js",
+    "test:guides": "node study_guides_doctest.js"
+  },
+  "devDependencies": {
+    "puppeteer-core": "22.15.0"
+  }
+}

@@ -34,10 +34,15 @@
   const STORE_VERSION = 4; // v1: prefs/session/notes/annotations; v2: + exam, attempts, examPrefs; v3: + reviews, frozen grades;
                            // v4: practice notes/annotations move onto the practice session (no longer shared across sessions)
 
+  const isObj = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
   function load() {
-    try { return JSON.parse(localStorage.getItem(STORE_KEY)); } catch (e) { return null; }
+    try { const v = JSON.parse(localStorage.getItem(STORE_KEY)); return isObj(v) ? v : null; } catch (e) { return null; }
   }
+  // If another tab writes the store, this tab's copy is out of date: saving it would overwrite the other tab's
+  // work (e.g. erase an exam submitted there). Stop saving and ask for a reload instead (see the 'storage' listener).
+  let staleTab = false;
   function save() {
+    if (staleTab) return;
     try { localStorage.setItem(STORE_KEY, JSON.stringify(store)); } catch (e) { /* storage unavailable: work lives in memory only */ }
   }
   let saveTimer = null;
@@ -57,18 +62,39 @@
     });
     return groups;
   }
-  // Sessions saved before grouping existed navigated per part; convert them in place.
+  // Sessions saved before grouping existed navigated per part; convert them in place. Also repairs records
+  // that are damaged or from older versions (missing maps, groups that don't match the ids, a bad index or
+  // timer) instead of crashing; a record with no usable question ids is dropped.
   function migrateSession(s) {
-    if (!s || !s.ids || !s.ids.length || !s.ids.every((id) => QMAP[id])) return null;
-    if (!s.groups) {
-      const cur = s.ids[s.index] || s.ids[0];
+    if (!isObj(s) || !Array.isArray(s.ids) || !s.ids.length || !s.ids.every((id) => QMAP[id])) return null;
+    const groupsOk = Array.isArray(s.groups) && s.groups.length && s.groups.every((g) => isObj(g) && PROBLEMS[g.pid] &&
+      Array.isArray(g.ids) && g.ids.length && g.ids.every((id) => QMAP[id] && QMAP[id].problem === g.pid)) &&
+      s.groups.reduce((t, g) => t + g.ids.length, 0) === s.ids.length;
+    if (!groupsOk) {
+      const curId = s.ids[s.index] || s.ids[0];
+      const legacy = !s.groups; // v1: index and marks were per part
       s.groups = groupIds(s.ids);
-      s.index = Math.max(0, s.groups.findIndex((g) => g.ids.includes(cur)));
-      const marked = {};
-      Object.keys(s.marked || {}).forEach((id) => { if (QMAP[id]) marked[QMAP[id].problem] = true; });
-      s.marked = marked;
+      s.index = legacy ? Math.max(0, s.groups.findIndex((g) => g.ids.includes(curId))) : 0;
+      if (legacy) {
+        const marked = {};
+        Object.keys(isObj(s.marked) ? s.marked : {}).forEach((id) => { if (QMAP[id]) marked[QMAP[id].problem] = true; });
+        s.marked = marked;
+      }
     }
+    ['answers', 'checked', 'revealed', 'selfGrade', 'marked', 'eliminated'].forEach((k) => { if (!isObj(s[k])) s[k] = {}; });
+    if (!Number.isInteger(s.index) || s.index < 0 || s.index >= s.groups.length) s.index = 0;
+    const t = s.timer;
+    if (t && !(isObj(t) && typeof t.durationMs === 'number' && typeof t.remainingMs === 'number' && (t.runningSince === null || typeof t.runningSince === 'number'))) s.timer = null;
+    if (typeof s.title !== 'string') s.title = 'Practice set';
+    if (typeof s.startedAt !== 'number') s.startedAt = Date.now();
     return s;
+  }
+  // Keep only valid values in saved preference lists (they drive filtering on the home page).
+  function cleanPrefs(p, d, lists) {
+    Object.keys(lists).forEach((k) => { p[k] = Array.isArray(p[k]) ? [...new Set(p[k].filter((v) => lists[k].includes(v)))] : d[k].slice(); });
+    if (typeof p.timerOn !== 'boolean') p.timerOn = d.timerOn;
+    if (typeof p.minutes !== 'number') p.minutes = d.minutes;
+    return p;
   }
   // Older notes used ___(a)___ placeholders; the editor now keeps the template token ⟦a⟧.
   function migrateNotes(notes) {
@@ -82,7 +108,7 @@
   // Exam attempts have the same shape as a practice session plus mode: 'exam'. They carry their own
   // scratch notes and annotations, so practice work never shows up inside an exam (or the reverse).
   function migrateAttempt(a) {
-    if (!a || a.mode !== 'exam' || !migrateSession(a)) return null;
+    if (!isObj(a) || a.mode !== 'exam' || typeof a.id !== 'string' || !migrateSession(a)) return null;
     a.notes = migrateNotes(a.notes || {});
     a.annotations = a.annotations || {};
     a.eliminated = a.eliminated || {};
@@ -92,11 +118,13 @@
   const saved = load();
   const store = {
     version: STORE_VERSION, // same storage key as v1, so practice sessions saved before exams existed still load
-    prefs: Object.assign({}, DEFAULT_PREFS, saved && saved.prefs),
+    prefs: cleanPrefs(Object.assign({}, DEFAULT_PREFS, isObj(saved && saved.prefs) ? saved.prefs : {}), DEFAULT_PREFS,
+      { topics: TOPICS.map((t) => t.id), exams: Object.keys(EXAMS), difficulties: DIFFS, types: TYPES.map((t) => t.id) }),
     session: migrateSession(saved && saved.session), // the practice set; carries its own notes/annotations (see below)
-    examPrefs: Object.assign({}, DEFAULT_EXAM_PREFS, saved && saved.examPrefs),
+    examPrefs: cleanPrefs(Object.assign({}, DEFAULT_EXAM_PREFS, isObj(saved && saved.examPrefs) ? saved.examPrefs : {}), DEFAULT_EXAM_PREFS,
+      { topics: TOPICS.map((t) => t.id), picked: Object.keys(PROBLEMS) }),
     exam: migrateAttempt(saved && saved.exam),         // the exam in progress (never submitted), or null
-    attempts: ((saved && saved.attempts) || []).map(migrateAttempt).filter(Boolean), // submitted exams, oldest first
+    attempts: (Array.isArray(saved && saved.attempts) ? saved.attempts : []).map(migrateAttempt).filter(Boolean), // submitted exams, oldest first
     reviews: (saved && saved.reviews && typeof saved.reviews === 'object') ? saved.reviews : {}, // attemptId -> review workspace
   };
   // Scratch code and annotations belong to the session they were made in. Before v4, practice kept them in
@@ -117,6 +145,9 @@
     if (!a || !w || w.reviewOf !== id || !w.answers || typeof w.answers !== 'object' || !Array.isArray(w.groups)) delete store.reviews[id];
   });
   if (!EXAMS[store.examPrefs.examId]) store.examPrefs.examId = DEFAULT_EXAM_PREFS.examId;
+  if (!SIZES.includes(store.prefs.size)) store.prefs.size = DEFAULT_PREFS.size;
+  if (!['practice', 'exam'].includes(store.prefs.mode)) store.prefs.mode = 'practice';
+  if (!['full', 'custom'].includes(store.examPrefs.kind)) store.examPrefs.kind = 'full';
   store.examPrefs.picked = [...new Set(store.examPrefs.picked)].filter((pid) => PROBLEMS[pid]);
   // view: which session the question screen shows. 'practice' | 'exam' (in progress) | 'review' (a submitted attempt)
   const ui = { screen: 'landing', view: 'practice', attemptId: null, menu: null, navOpen: false, dirOpen: false, hideClock: false, confirmReveal: null, annMode: 'none', examQuery: '' };
@@ -957,7 +988,7 @@
     const resume = s && !s.finished ? `
       <div class="resume" role="region" aria-label="Unfinished practice">
         <div><strong>You have an unfinished set: ${esc(s.title)}</strong>
-          <span class="hint">Question ${s.index + 1} of ${s.groups.length} · ${s.ids.filter((id) => hasAnswer(s, id)).length} of ${s.ids.length} parts answered${s.timer ? ` · ${fmt(timeLeft(s.timer))} left on the timer` : ''}</span></div>
+          <span class="hint">Question ${s.index + 1} of ${s.groups.length} · ${s.ids.filter((id) => hasAnswer(s, id)).length} of ${s.ids.length} parts answered${s.timer ? ` · ${fmt(timeLeft(s.timer))} left on the timer${s.timer.runningSince ? '' : ' (paused)'}` : ''}</span></div>
         <div class="actions"><button class="btn btn-primary" data-action="resume">Resume Practice</button><button class="btn" data-action="discard">Start Over</button></div>
       </div>` : (s && s.finished ? `
       <div class="resume"><div><strong>Last set: ${esc(s.title)}</strong><span class="hint">Finished, ${s.groups.length} questions</span></div>
@@ -1152,6 +1183,7 @@
     undo: '<path d="M9 7L5 11l4 4" /><path d="M5 11h9a5 5 0 010 10h-3" />',
     redo: '<path d="M15 7l4 4-4 4" /><path d="M19 11h-9a5 5 0 000 10h3" />',
     clear: '<path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13" />',
+    home: '<path d="M4 11l8-7 8 7" /><path d="M6 9.5V20h4.5v-5h3v5H18V9.5" />',
   };
   const icon = (k) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[k]}</svg>`;
 
@@ -1459,7 +1491,7 @@
       ${ui.dirOpen ? `<div class="directions" role="dialog" aria-label="Directions"><p style="margin-top:0">${esc(BUBBLE_NOTE)}</p>${directions}<p>Annotate the problem with the toolbar on the left: highlighter, red pen, eraser, undo/redo.</p><p style="margin-bottom:0">Keyboard: <code>←</code>/<code>→</code> previous/next question, <code>M</code> mark for review, <code>Esc</code> closes the question navigator.</p></div>` : ''}`;
   }
   function bannerHTML(s) {
-    if (isReview(s)) return `<div class="review-banner" role="note"><span>Review workspace: edit answers and code freely. Your submitted answers and score stay as they were.</span><button class="btn btn-sm" data-action="exam-results">Back to results</button></div>`;
+    if (isReview(s)) return `<div class="review-banner" role="note"><span>Review workspace: edit answers and code freely. Your submitted answers and score stay as they were.</span><span class="banner-actions"><button class="btn btn-sm" data-action="exam-results">Back to results</button><button class="btn btn-sm btn-home" data-action="go-home">${icon('home')}Go to Home</button></span></div>`;
     if (isExam(s)) return '';
     return s.timer && s.timer.expired
       ? `<div class="expired-banner" role="alert"><span>⏰ Time’s up. Your answers are saved, so you can keep reviewing or finish.</span><button class="btn btn-sm" data-action="finish">Finish set</button></div>` : '';
@@ -1528,10 +1560,12 @@
       <div class="actions">
         <button class="btn btn-primary" data-action="retry-missed" ${missed.length ? '' : 'disabled'}>Retry incorrect &amp; unanswered (${missed.length})</button>
         <button class="btn" data-action="review" data-i="0">Review answers</button>
-        <button class="btn" data-action="home">New set</button>
+        <button class="btn" data-action="new-set">New set</button>
+        <button class="btn btn-home" data-action="go-home">${icon('home')}Go to Home</button>
       </div>
       <div class="result-list">${rows}</div>
       <p class="hint">Click a part to go back to it. Multiple-choice answers are graded automatically. For written answers, show the solution and grade yourself.</p>
+      <p class="hint">All grades on this platform are for practice purposes only and do not predict your actual exam scores.</p>
     </main>`;
   }
 
@@ -1674,7 +1708,7 @@
         <button class="btn btn-primary" data-action="exam-review" data-i="0">Review Questions</button>
         <button class="btn" data-action="goto-insights">Learning Insights</button>
         <button class="btn" data-action="retake">Retake this exam</button>
-        <button class="btn" data-action="home">Back to home</button>
+        <button class="btn btn-home" data-action="go-home">${icon('home')}Go to Home</button>
       </div>
       <h2 class="rq-h">Questions</h2>
       <p class="hint">Counts are by part. Open a question to see its parts, then <b>Review</b> to work through it again next to the official answer.</p>
@@ -1812,7 +1846,18 @@
         ui.menu = null;
         if (store.session && !store.session.finished && !confirm('Starting a new set replaces your unfinished one. Continue?')) return;
         startFromPrefs(); return;
-      case 'resume': setView('practice'); ui.screen = 'practice'; ui.menu = null; break;
+      case 'resume': {
+        setView('practice'); ui.screen = 'practice'; ui.menu = null;
+        const t = store.session && store.session.timer; // restart a timer that Exit paused
+        if (t && t.pausedByExit) { delete t.pausedByExit; if (t.remainingMs > 0) t.runningSince = Date.now(); }
+        break;
+      }
+      // Results pages / review: back to the home page. Never starts, ends or changes a session or attempt.
+      case 'go-home':
+        if (ui.screen === 'exam-results' || isReview(s)) p.mode = 'exam'; // so Exam History is right there
+        setView('practice'); ui.screen = 'home'; ui.navOpen = false; ui.dirOpen = false; window.scrollTo(0, 0); break;
+      case 'new-set': // Practice Summary: home, with the practice setup showing
+        p.mode = 'practice'; setView('practice'); ui.screen = 'home'; window.scrollTo(0, 0); break;
       case 'discard': if (!confirm('Discard your unfinished set? Your answers in it will be lost.')) return; store.session = null; break;
       case 'show-results': setView('practice'); ui.screen = 'results'; break;
       case 'mode': p.mode = btn.dataset.v; ui.menu = null; break;
@@ -1877,6 +1922,8 @@
       }
       // practice
       case 'home':
+        // Leaving a practice set (its "save and leave"): pause a running timer; Resume restarts it.
+        if (ui.screen === 'practice' && ui.view === 'practice' && s && s.timer && s.timer.runningSince) { pauseTimer(s.timer); s.timer.pausedByExit = true; }
         if (ui.screen === 'exam-results') p.mode = 'exam';
         setView('practice'); ui.screen = 'home'; ui.navOpen = false; ui.dirOpen = false; window.scrollTo(0, 0); break;
       case 'prev': go(s.index - 1); return;
@@ -2101,6 +2148,25 @@
     }
   });
   window.addEventListener('beforeunload', save);
+  // Another tab saved: this tab's copy is stale. Saving is already blocked (save()); cover the page so no
+  // work is done here that can't be kept, and offer a reload, which picks up the other tab's state.
+  window.addEventListener('storage', (e) => {
+    if (e.key !== STORE_KEY || staleTab) return;
+    staleTab = true;
+    clearTimeout(saveTimer);
+    const box = document.createElement('div');
+    box.className = 'stale-overlay';
+    box.setAttribute('role', 'alertdialog');
+    box.setAttribute('aria-modal', 'true');
+    box.setAttribute('aria-labelledby', 'stale-title');
+    box.innerHTML = `<div class="stale-card"><h2 id="stale-title">This page is out of date</h2>
+      <p>CS 61A Practice was changed in another tab or window. To keep that work safe, this page has stopped saving.</p>
+      <button class="btn btn-primary" id="stale-reload">Reload to continue</button></div>`;
+    document.body.appendChild(box);
+    app.inert = true; // nothing behind the notice can be clicked or tabbed to
+    box.querySelector('#stale-reload').addEventListener('click', () => location.reload());
+    box.querySelector('#stale-reload').focus();
+  });
 
   // Attempts submitted before grades were frozen get their snapshot now, once; after that it never changes.
   store.attempts.forEach((a) => { if (!a.graded || !a.score || a.score.v !== 2) Object.assign(a, gradeAttempt(a)); });
