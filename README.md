@@ -37,6 +37,7 @@ To deploy, upload the `app/` folder to any static host (Netlify drop, Vercel, Gi
   - Needs an internet connection the first time: Python (about 10 MB) is downloaded from the jsDelivr CDN, then cached by the browser. It works both when the site is served and when `index.html` is opened directly.
   - Code that uses the course's `Link` or `Tree` classes needs those definitions in the editor; the runner doesn't add them.
   - The worker keeps student code off the page and away from saved data, but it is not a security sandbox (code can still make network requests).
+- **Analytics:** `index.html` loads Cloudflare Web Analytics (aggregate visits and page views, no cookies), only when served from `jacobkao-cal.github.io`, so local copies and the tests send nothing. The app sends it nothing: answers, code, grades and exam history never leave the browser. A privacy note on the home page says so.
 - **Saving:** everything is stored in `localStorage`. The home page offers **Resume Practice** and **Start Over**.
 - **Results:** counts of completed, correct, incorrect, not graded, and unanswered questions, plus time spent. You can retry the missed questions or jump back to any one.
 

@@ -1049,6 +1049,7 @@
       </section>`}
 
       <div class="notice">No account needed. Your answers, code notes and annotations are saved in <b>this browser on this device</b> and are gone if you clear site data.</div>
+      <p class="disclaimer">Privacy: this site uses Cloudflare Web Analytics, which collects aggregate traffic statistics (such as visits and page views) without cookies. Your answers, code, grades and exam history stay in your browser’s localStorage and are never sent anywhere.</p>
       <p class="disclaimer">Independent student project, not an official UC Berkeley / CS 61A service. Questions and answers are transcribed from CS 61A Midterm 2 (Fall 2025, Spring 2025, Fall 2024 and Spring 2024) and credited on each question. Explanations were written for this prototype and are not official.</p>
     </main>`;
   }

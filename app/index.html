@@ -21,5 +21,17 @@
   <script src="data/test_suites.js"></script>
   <script src="runner.js"></script>
   <script src="app.js"></script>
+  <!-- Cloudflare Web Analytics: aggregate visits/page views only. Added only on the published site, so local copies
+       and the test suite send nothing (Cloudflare rejects other origins and logs console errors). -->
+  <script>
+    if (location.hostname === 'jacobkao-cal.github.io') {
+      const cf = document.createElement('script');
+      cf.type = 'module';
+      cf.src = 'https://static.cloudflareinsights.com/beacon.min.js';
+      cf.setAttribute('data-cf-beacon', '{"token": "629fadce777742a0838d877beeb3f5d5"}');
+      document.body.appendChild(cf);
+    }
+  </script>
+  <!-- End Cloudflare Web Analytics -->
 </body>
 </html>
