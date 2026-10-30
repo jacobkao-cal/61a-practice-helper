@@ -31,7 +31,8 @@
   const EXAM_DEFAULT_MINUTES = 120;
   const EXAM_MAX_MINUTES = 300;
   const DEFAULT_EXAM_PREFS = { kind: 'full', examId: Object.keys(EXAMS)[0], topics: [], picked: [], timerOn: true, minutes: EXAM_DEFAULT_MINUTES };
-  const STORE_VERSION = 3; // v1: prefs/session/notes/annotations; v2: + exam, attempts, examPrefs; v3: + reviews, frozen grades
+  const STORE_VERSION = 4; // v1: prefs/session/notes/annotations; v2: + exam, attempts, examPrefs; v3: + reviews, frozen grades;
+                           // v4: practice notes/annotations move onto the practice session (no longer shared across sessions)
 
   function load() {
     try { return JSON.parse(localStorage.getItem(STORE_KEY)); } catch (e) { return null; }
@@ -92,14 +93,23 @@
   const store = {
     version: STORE_VERSION, // same storage key as v1, so practice sessions saved before exams existed still load
     prefs: Object.assign({}, DEFAULT_PREFS, saved && saved.prefs),
-    session: migrateSession(saved && saved.session),
-    notes: migrateNotes((saved && saved.notes) || {}), // problemId -> scratch editor text (kept across sessions)
-    annotations: (saved && saved.annotations) || {},  // problemId -> [annotation] (kept across sessions)
+    session: migrateSession(saved && saved.session), // the practice set; carries its own notes/annotations (see below)
     examPrefs: Object.assign({}, DEFAULT_EXAM_PREFS, saved && saved.examPrefs),
     exam: migrateAttempt(saved && saved.exam),         // the exam in progress (never submitted), or null
     attempts: ((saved && saved.attempts) || []).map(migrateAttempt).filter(Boolean), // submitted exams, oldest first
     reviews: (saved && saved.reviews && typeof saved.reviews === 'object') ? saved.reviews : {}, // attemptId -> review workspace
   };
+  // Scratch code and annotations belong to the session they were made in. Before v4, practice kept them in
+  // store-wide maps keyed by problem, so they leaked into every later set with the same question. A saved
+  // practice set takes over the entries for its own problems; the rest belonged to finished sets and are dropped.
+  if (store.session && !store.session.notes) {
+    const oldNotes = migrateNotes((saved && saved.notes) || {});
+    const oldAnns = (saved && saved.annotations) || {};
+    const own = new Set(store.session.groups.map((g) => g.pid));
+    store.session.notes = Object.fromEntries(Object.entries(oldNotes).filter(([pid]) => own.has(pid)));
+    store.session.annotations = Object.fromEntries(Object.entries(oldAnns).filter(([pid]) => own.has(pid) && Array.isArray(oldAnns[pid])));
+  }
+  if (store.session) store.session.annotations = store.session.annotations || {};
   // Drop review workspaces whose attempt is gone or whose record is damaged (they are rebuilt from the attempt on open).
   Object.keys(store.reviews).forEach((id) => {
     const w = store.reviews[id];
@@ -137,8 +147,9 @@
     }
     return store.reviews[id];
   }
-  const notesOf = () => (isExam(cur()) ? cur().notes : store.notes);
-  const annotationsOf = () => (isExam(cur()) ? cur().annotations : store.annotations);
+  // Every session (practice set, exam, review workspace) keeps its own scratch code and annotations.
+  const notesOf = () => cur().notes || (cur().notes = {});
+  const annotationsOf = () => cur().annotations || (cur().annotations = {});
 
   function announce(msg) {
     live.textContent = '';
@@ -393,7 +404,7 @@
   }
 
   // ───────────────────────────── Annotations (left pane) ─────────────────────────────
-  // Stored per problem in annotationsOf()[pid] (practice: store.annotations; exams: the attempt's own):
+  // Stored per problem in annotationsOf()[pid], i.e. on the session being shown:
   //   { id, kind: 'hl',   where: 'intro' | 'outro', start, end }    text-offset highlight in the prose
   //   { id, kind: 'code', from: {line, ch}, to: {line, ch} }         highlight inside the code editor
   //   { id, kind: 'pen',  block, pts: [[x, y], …] }                  freehand stroke, relative to a block
@@ -754,7 +765,7 @@
   function newSession(ids, title) {
     const p = store.prefs;
     const timer = p.timerOn ? { durationMs: p.minutes * 60000, remainingMs: p.minutes * 60000, runningSince: Date.now(), expired: false } : null;
-    store.session = { ids, groups: groupIds(ids), index: 0, title, answers: {}, checked: {}, revealed: {}, selfGrade: {}, marked: {}, eliminated: {}, timer, startedAt: Date.now(), finishedAt: null, finished: false };
+    store.session = { ids, groups: groupIds(ids), index: 0, title, answers: {}, checked: {}, revealed: {}, selfGrade: {}, marked: {}, eliminated: {}, notes: {}, annotations: {}, timer, startedAt: Date.now(), finishedAt: null, finished: false };
     setView('practice');
     ui.screen = 'practice';
     ui.navOpen = false;
@@ -785,16 +796,22 @@
   }
   const curGroup = () => cur().groups[cur().index];
 
-  // Switch which session the question screen shows. Editors and annotation history are cached per
-  // problem, so they are dropped whenever the session changes (each session has its own notes).
+  // Switch which session the question screen shows.
   function setView(view, attemptId) {
     if (ui.view === view && ui.attemptId === (attemptId || null)) return;
     ui.view = view;
     ui.attemptId = attemptId || null;
+    dropLeftCaches();
+  }
+  // Live editors and annotation undo history are cached per problem id, so they must be thrown away whenever
+  // a different session is shown (a new practice set can contain the same problem as the last one).
+  let cachedFor = null; // the session object the caches were built for
+  function dropLeftCaches() {
     detachEditors();
     Object.keys(editors).forEach((k) => delete editors[k]);
     Object.keys(history).forEach((k) => delete history[k]);
     leftPid = null;
+    cachedFor = null;
     ui.annMode = 'none';
     ui.navOpen = false;
     ui.confirmReveal = null;
@@ -1686,6 +1703,7 @@
 
     if (ui.screen === 'practice') {
       const s = cur();
+      if (cachedFor !== s) { dropLeftCaches(); cachedFor = s; } // new/restarted set: nothing carried over
       const g = curGroup();
       const shell = `${ui.view}:${ui.attemptId || ''}`; // practice, exam and review each get a fresh shell
       if (!document.getElementById('pane-left') || app.dataset.shell !== shell) {

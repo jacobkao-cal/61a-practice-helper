@@ -22,7 +22,7 @@ To deploy, upload the `app/` folder to any static host (Netlify drop, Vercel, Gi
   - The left side shows the shared problem text and an **editable Python editor** (CodeMirror, dark theme, line numbers), where you can type notes, comments, or your own solution. Nothing is run.
   - **Answers fill the code:** picking a choice, or typing an answer, shows it in that part's blank right away. Selected choices are blue, typed answers green, and the active part's blank is outlined. Click a blank to jump to its part.
   - **Annotation toolbar** (top of the left pane): highlighter (select text or code), red pen (freehand), eraser (click or drag), undo/redo, and clear all (asks first). Each question keeps its own annotations.
-  - Code edits and annotations are saved per problem. **Reset code** restores the original code and keeps your answers.
+  - Code edits and annotations are saved with the practice set (or exam attempt) they were made in, so resuming brings them back and a new set starts clean. **Reset code** restores the original code and keeps your answers.
   - The right side shows each part in the exam's own format: **round bubbles** for "select exactly one", **square checkboxes** for "select all that apply", and a bordered answer box for written answers.
 - **Grading:**
   - **Check Answer** grades the response. **Show Solution** asks for confirmation, then shows the official answer and an explanation.
