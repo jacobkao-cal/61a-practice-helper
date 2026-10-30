@@ -208,6 +208,8 @@ mark.hl { background: #fff176; color: inherit; border-radius: 2px; padding: 0; }
 .case > summary:focus-visible { outline: 2px solid var(--accent, #2563eb); outline-offset: 2px; }
 .case-mark { font-weight: 700; width: 1em; text-align: center; }
 .case-state { margin-left: auto; font-size: 12.5px; font-weight: 600; }
+.tests-note { margin: 8px 0 0; font-size: 12.5px; color: var(--muted); }
+.case-origin { font-size: 11.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; }
 .st-case-passed .case-mark, .st-case-passed .case-state { color: var(--good); }
 .st-case-failed .case-mark, .st-case-failed .case-state, .st-case-error .case-mark, .st-case-error .case-state,
 .st-case-timeout .case-mark, .st-case-timeout .case-state { color: var(--bad); }

@@ -1,6 +1,6 @@
 // Phase 6B: verified doctest engine and PrairieLearn-style Test Results behind the single Run Code button.
-// The shipped suite registry is empty until Phase 6C, so this test adds FIXTURE suites (test-only, never shipped)
-// through a page-load hook. Needs internet access the first time (Pyodide is loaded from the jsDelivr CDN).
+// The engine is checked with FIXTURE suites (test-only, never shipped) that replace the real suites through a
+// page-load hook; the real suites (Phase 6C) are checked by phase6c_test_bank.test.js. Needs internet access the first time (Pyodide is loaded from the jsDelivr CDN).
 const puppeteer = require('puppeteer-core');
 const { APP_URL, CHROME } = require('./config');
 const KEY = 'cs61a-practice:v1';
@@ -33,10 +33,7 @@ const FIXTURES = [
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   page.on('dialog', (d) => d.accept());
 
-  // Shipped registry: verified suites only, none yet (6C adds them). Checked before the fixture hook is installed.
   await page.goto(APP_URL);
-  const shipped = await page.evaluate(() => window.CS61A_TEST_SUITES);
-  ok(shipped && Array.isArray(shipped.suites) && shipped.suites.length === 0, 'shipped registry has no suites (no fabricated test bank before 6C)');
   const B = await page.evaluate(() => window.CS61A_BANK);
   const key = B.ANSWER_KEY;
 
@@ -67,7 +64,7 @@ const FIXTURES = [
   const right = Object.fromEntries([...'abcdef'].map((b) => [b, key[`fa25-4${b}`].accepted[0]]));
   const practice = (pids) => seed({ prefs: { mode: 'practice', timerOn: false }, session: { ids: pids.flatMap((pid) => B.QUESTIONS.filter((q) => q.problem === pid).map((q) => q.id)), index: 0, title: 'Tests', answers: {}, timer: null, startedAt: Date.now(), finished: false } });
 
-  await practice(['fa25-4']);
+  await practice(['fa25-1']); // What Would Python Display: never has a suite
   await click('[data-action="enter"]'); await click('.resume [data-action="resume"]');
   let r = await run("print('plain')");
   ok(r.out === 'plain\n' && r.summary === null && !(await has('#run-suite')) && !/Passed|tests?!|Test Results/.test(r.panel), 'no verified suite: Console Output only, no test summary');
@@ -75,7 +72,7 @@ const FIXTURES = [
   // install the fixture suites for the rest of the test
   await page.evaluateOnNewDocument((fx) => {
     let v;
-    Object.defineProperty(window, 'CS61A_TEST_SUITES', { configurable: true, get: () => v, set: (x) => { v = x; v.suites = v.suites.concat(fx); } });
+    Object.defineProperty(window, 'CS61A_TEST_SUITES', { configurable: true, get: () => v, set: (x) => { v = x; v.suites = fx; } });
   }, FIXTURES);
   await practice(['fa25-4', 'fa25-3']);
   await click('[data-action="enter"]'); await click('.resume [data-action="resume"]');

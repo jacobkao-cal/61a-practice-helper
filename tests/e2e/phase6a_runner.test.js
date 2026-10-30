@@ -15,6 +15,11 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('console', (m) => { if (m.type() === 'error' && !/invalid\.example/.test(m.text())) errors.push(m.text()); });
   page.on('dialog', (d) => d.accept());
+  // These checks cover console-only behavior (6A), so the verified suites (6C) are removed for this test.
+  await page.evaluateOnNewDocument(() => {
+    let v;
+    Object.defineProperty(window, 'CS61A_TEST_SUITES', { configurable: true, get: () => v, set: (x) => { v = x; v.suites = []; } });
+  });
   const st = async () => { await wait(400); return page.evaluate((k) => JSON.parse(localStorage.getItem(k)), KEY); };
   const seed = async (obj) => {
     await page.evaluate((k, v) => { localStorage.setItem(k, v); Storage.prototype.setItem = function () {}; }, KEY, JSON.stringify(obj));

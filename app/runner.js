@@ -19,12 +19,12 @@
 //     (progress = { done, total } while testing).
 //     result = { status: 'ok' | 'error' | 'timeout' | 'load-error' | 'crash',
 //                stdout, error, truncated, ms, message, tests? }
-//   tests (optional, Phase 6B) = { setup, cases: [{ name, input }] }, where each case's `input` is doctest text
+//   tests (optional, Phase 6B) = { setup, cases: [{ name, origin, input }] }, where each case's `input` is doctest text
 //     (`>>> expr` lines followed by the expected output). The code runs once for Console Output; if that run
 //     completes without error, each case then runs on its own: a fresh namespace, the setup, the student's code,
 //     then the case's examples, checked exactly like Python's doctest. A case that runs too long stops Python,
 //     so the cases after it are reported as not run (never counted as passed).
-//     result.tests = { total, passed, notRun, reason, cases: [{ name, input, status, examples, error, ms }] }
+//     result.tests = { total, passed, notRun, reason, cases: [{ name, origin, input, status, examples, error, ms }] }
 //       status: 'passed' | 'failed' (an example's output differed or it raised) | 'error' (the code itself could
 //               not be loaded for this case) | 'timeout' | 'not-run'
 //       examples: [{ source, want, got, ok, error, truncated }]
@@ -259,7 +259,7 @@ def run_case(src, setup, case_src, limit):
   }
 
   function testCases(tests) {
-    return tests.cases.map((c, i) => ({ name: c.name || `Case ${i + 1}`, input: c.input, status: 'not-run', examples: [], error: null, ms: 0 }));
+    return tests.cases.map((c, i) => ({ name: c.name || `Case ${i + 1}`, origin: c.origin || null, input: c.input, status: 'not-run', examples: [], error: null, ms: 0 }));
   }
   function runTestsSkipped(tests, reason) {
     const cases = testCases(tests);

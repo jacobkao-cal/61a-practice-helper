@@ -1328,7 +1328,7 @@
         </div>`).join('');
       }
       return `<details class="case st-case-${c.status}" data-case="${i}">
-        <summary><span class="case-mark" aria-hidden="true">${mark}</span> ${esc(c.name)} <span class="case-state">${word}</span></summary>
+        <summary><span class="case-mark" aria-hidden="true">${mark}</span> ${esc(c.name)}${c.origin ? ` <span class="case-origin">${c.origin === 'exam' ? 'From the exam' : 'Added'}</span>` : ''} <span class="case-state">${word}</span></summary>
         <div class="case-body">${body}</div>
       </details>`;
     }).join('');
@@ -1337,6 +1337,7 @@
       <p class="tests-summary ${ran && all ? 'tests-all' : 'tests-some'}" id="tests-summary">${summary}</p>
       ${why}
       <div class="cases">${cases}</div>
+      ${t.setupNote ? `<p class="tests-note">${esc(t.setupNote)}</p>` : ''}
       <p class="tests-note">Verified tests for this question. Practice feedback only: running them never changes your answers or scores.</p>
     </div>`;
   }
@@ -1376,7 +1377,10 @@
     const key = runKey(s, pid);
     const code = runnableCode(pid); // read now: later edits belong to the next run
     const suite = suiteFor(pid);
-    const tests = suite && { setup: suite.setup || '', cases: suite.cases.map((c) => ({ name: typeof c.name === 'string' ? c.name : '', input: c.input })) };
+    const tests = suite && {
+      setup: suite.setup || '',
+      cases: suite.cases.map((c) => ({ name: typeof c.name === 'string' ? c.name : '', origin: c.origin === 'exam' || c.origin === 'added' ? c.origin : null, input: c.input })),
+    };
     const id = ++runSeq;
     runBusy = true;
     runs.set(key, { id, phase: RUNNER.ready ? 'running' : 'loading' });
@@ -1386,6 +1390,7 @@
       onPhase: (phase, progress) => { const r = runs.get(key); if (r && r.id === id && r.phase) { r.phase = phase; r.progress = progress; renderRunPanel(); } },
     });
     runBusy = false;
+    if (result.tests && suite && typeof suite.setupNote === 'string') result.tests.setupNote = suite.setupNote;
     if (runs.get(key) && runs.get(key).id === id) runs.set(key, Object.assign({ id }, result));
     renderRunPanel(); // shows the result only if this question is still on screen; otherwise it waits for it
     const t = result.tests;
