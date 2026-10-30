@@ -182,6 +182,41 @@ mark.hl { background: #fff176; color: inherit; border-radius: 2px; padding: 0; }
 .key-fill.key-mc { color: #9ee8ff; border-bottom: 2px solid #66d9ef; }
 .key-fill.key-typed { color: #c3f08a; border-bottom: 2px dashed #a6e22e; }
 .editor-fallback { display: block; width: 100%; min-height: 320px; border: 0; padding: 10px 12px; font-family: var(--mono); font-size: 13.5px; background: #272822; color: #f8f8f2; resize: vertical; }
+/* Run Code (Phase 6A): run bar + Console Output under the scratch editor */
+.run-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; background: #f1f2f4; border-top: 1px solid #1e1f1c; padding: 6px 10px; }
+.btn-run { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-run:hover:not(:disabled) { background: #0b4a85; }
+.btn-run[aria-busy="true"] { cursor: progress; }
+.run-status { font-size: 12.5px; color: var(--muted); }
+.run-status.st-ok { color: var(--good); font-weight: 600; }
+.run-status.st-error, .run-status.st-timeout, .run-status.st-load-error, .run-status.st-crash { color: var(--bad); font-weight: 600; }
+.run-console { border-top: 1px solid var(--line); background: var(--paper); padding: 8px 10px 10px; font-size: 13px; }
+.run-label { font-size: 11.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+.run-out, .run-err { font-family: var(--mono); font-size: 13px; margin: 0 0 6px; padding: 8px 10px; border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow: auto; }
+.run-out { background: var(--code-bg); border: 1px solid var(--line); color: var(--ink); }
+.run-err { background: var(--bad-soft); border: 1px solid #f1c3bd; color: #7a1610; }
+.run-empty { margin: 0 0 6px; color: var(--muted); font-style: italic; }
+.run-msg { margin: 0 0 6px; }
+.run-suite { font-size: 12.5px; color: var(--muted); }
+.run-tests { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.tests-summary { margin: 0 0 8px; font-weight: 700; font-size: 14px; }
+.tests-summary.tests-all { color: var(--good); }
+.tests-summary.tests-some { color: var(--ink); }
+.cases { display: grid; gap: 6px; }
+.case { border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+.case > summary { cursor: pointer; padding: 6px 10px; display: flex; align-items: center; gap: 8px; }
+.case > summary:focus-visible { outline: 2px solid var(--accent, #2563eb); outline-offset: 2px; }
+.case-mark { font-weight: 700; width: 1em; text-align: center; }
+.case-state { margin-left: auto; font-size: 12.5px; font-weight: 600; }
+.st-case-passed .case-mark, .st-case-passed .case-state { color: var(--good); }
+.st-case-failed .case-mark, .st-case-failed .case-state, .st-case-error .case-mark, .st-case-error .case-state,
+.st-case-timeout .case-mark, .st-case-timeout .case-state { color: var(--bad); }
+.st-case-not-run .case-mark, .st-case-not-run .case-state { color: var(--muted); }
+.case-body { padding: 4px 10px 8px; border-top: 1px solid var(--line); }
+.case-ex + .case-ex { margin-top: 8px; padding-top: 8px; border-top: 1px dotted var(--line); }
+.case-k { font-size: 11.5px; font-weight: 700; color: var(--muted); margin: 4px 0 2px; }
+.case-v { font-family: var(--mono); font-size: 13px; margin: 0; padding: 6px 8px; border-radius: 4px; background: var(--code-bg); border: 1px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; overflow: auto; }
+.case-v.case-bad { border-color: var(--bad); }
 .editor-hint { font-family: var(--sans); font-size: 12.5px; color: var(--muted); margin: 4px 0 14px; }
 kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; background: var(--paper); }
 

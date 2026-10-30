@@ -203,14 +203,14 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     const cm = document.querySelector('.CodeMirror').CodeMirror;
     cm.replaceRange('# probe\n', { line: 0, ch: 0 });
     const slot = document.querySelector('.run-slot');
-    return { value: cm.getValue().startsWith('# probe'), slot: !!slot && slot.hidden && !!slot.dataset.runSlot };
+    return { value: cm.getValue().startsWith('# probe'), slot: !!slot && !slot.hidden && !!slot.dataset.runSlot && !!slot.querySelector('#run-btn') };
   });
   await wait(400);
   S = await st();
   const wid = Object.keys(S.reviews)[0];
   ok(ready.value && Object.values(S.reviews[wid].notes).some((n) => n.startsWith('# probe')), 'CodeMirror text is retrievable and saved to the review workspace only');
   ok(!S.attempts.some((x) => Object.values(x.notes || {}).some((n) => n.startsWith('# probe'))), 'submitted attempts unaffected by editor changes');
-  ok(ready.slot, 'reserved run slot exists next to the editor (hidden, keyed by problem)');
+  ok(ready.slot, 'run slot next to the editor holds the Run Code button (keyed by problem)');
 
   // ── §11 responsive: results action rows wrap, no overflow ──
   await page.setViewport({ width: 375, height: 740 });

@@ -1224,11 +1224,173 @@
       </article>
       ${review ? '<section class="review-work" id="review-work" aria-label="Review workspace"></section>' : ''}`;
   }
-  // Phase 6 extension point: the single "Run Code" action and its output / doctest panel for a problem's
-  // Python workspace mount here (Pyodide in a Web Worker). Results will be learning feedback only: no points,
-  // no change to submitted answers or scores. Nothing runs in this phase, so the slot stays empty and hidden.
+  // ── Run Code (Phase 6A): runs the problem's scratch code with Python in the browser (runner.js) ──
+  // Phase 6B: when a verified suite exists for the problem (data/test_suites.js), the same click also runs it.
+  // Learning feedback only: running never changes answers, grades, scores or attempts, and run output is kept
+  // in memory (never saved). Available in Practice and in the editable Review; not during a live exam, which
+  // shows no feedback until submission (and real exams have no interpreter).
+  const RUNNER = window.CS61A_RUNNER || null;
+  const runnerAllowed = (s) => !!RUNNER && !!s && (!isExam(s) || isReview(s));
+  const runs = new Map();         // `${session key}:${pid}` -> { id, phase } while running, then the result
+  const sessionKeys = new WeakMap(); // session object -> small id (practice sets have no id of their own)
+  let runSeq = 0;
+  let sessionSeq = 0;
+  let runBusy = false;            // one run at a time across the whole app
+  function runKey(s, pid) {
+    if (!sessionKeys.has(s)) sessionKeys.set(s, `s${++sessionSeq}`);
+    return `${sessionKeys.get(s)}:${pid}`;
+  }
+  // Exactly what the editor shows: its current text, with each blank replaced by the student's current answer
+  // (indented like the on-screen widget), or left as ___(a)___ when unanswered, which then fails clearly.
+  function runnableCode(pid) {
+    const ed = editors[pid];
+    if (!ed) return '';
+    const text = ed.cm ? ed.cm.getValue() : ed.wrap.querySelector('textarea').value;
+    return text.split('\n').map((line) => line.replace(TOKEN_RE, (m, name, col) => {
+      const f = blankFill(pid, name);
+      return f ? f.text.split('\n').map((l, i) => (i ? ' '.repeat(col) + l : l)).join('\n') : `___(${name})___`;
+    })).join('\n');
+  }
+  // The verified suite for a problem, or null. Only an explicit, verified suite with a verification record and
+  // well-formed doctest cases counts; anything else means Console Output only, never a made-up test summary.
+  function suiteFor(pid) {
+    const reg = window.CS61A_TEST_SUITES;
+    const list = isObj(reg) && Array.isArray(reg.suites) ? reg.suites : [];
+    return list.find((t) => isObj(t) && t.problem === pid && t.verified === true && isObj(t.verification)
+      && (t.setup == null || typeof t.setup === 'string')
+      && Array.isArray(t.cases) && t.cases.length > 0
+      && t.cases.every((c) => isObj(c) && typeof c.input === 'string' && c.input.includes('>>>'))) || null;
+  }
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
   function runSlotHTML(pid) {
-    return `<div class="run-slot" id="run-slot-${pid}" data-run-slot="${pid}" hidden></div>`;
+    if (!runnerAllowed(cur())) return `<div class="run-slot" id="run-slot-${pid}" data-run-slot="${pid}" hidden></div>`;
+    const suite = suiteFor(pid);
+    return `<div class="run-slot" id="run-slot-${pid}" data-run-slot="${pid}">
+      <div class="run-bar">
+        <button class="btn btn-sm btn-run" id="run-btn" data-action="run-code" title="${suite ? 'Run this code and its verified tests' : 'Run this code with Python in your browser'}">▶ Run Code</button>
+        ${suite ? `<span class="run-suite" id="run-suite">Includes ${plural(suite.cases.length, 'verified test')}</span>` : ''}
+        <span class="run-status" id="run-status" role="status" aria-live="polite"></span>
+      </div>
+      <div class="run-console" id="run-console" hidden></div>
+    </div>`;
+  }
+  // Console Output for one run, then Test Results when the problem has a verified suite.
+  function runOutputHTML(r) {
+    return consoleHTML(r) + (r.tests ? testsHTML(r.tests) : '');
+  }
+  function consoleHTML(r) {
+    if (r.status === 'timeout') {
+      return `<p class="run-msg">Stopped after ${Math.round(RUNNER.config.RUN_TIMEOUT_MS / 1000)} seconds: the code may have an infinite loop or very slow recursion. Python was restarted, so you can run again.</p>`;
+    }
+    if (r.status === 'load-error') {
+      return `<p class="run-msg">Couldn’t load Python in your browser. Check your internet connection (the runtime is downloaded the first time) and press Run Code to try again.</p>`;
+    }
+    if (r.status === 'crash') return `<p class="run-msg">Python stopped unexpectedly (for example, recursion too deep for the browser). It has been restarted; you can run again.</p>`;
+    const out = r.stdout ? `<pre class="run-out" tabindex="0" aria-label="Program output">${esc(r.stdout)}</pre>` : '<p class="run-empty">No output</p>';
+    const trunc = r.truncated ? `<p class="run-msg">Output was cut off after ${RUNNER.config.OUTPUT_LIMIT.toLocaleString()} characters.</p>` : '';
+    const err = r.error ? `<pre class="run-err" tabindex="0" aria-label="Error">${esc(r.error)}</pre>` : '';
+    return `<div class="run-label">Console Output</div>${out}${trunc}${err}`;
+  }
+  // PrairieLearn-style results: a summary with the actual counts, then one expandable panel per case.
+  // Cases that did not run are shown as "Not run", never counted as passed. No points or percentages.
+  const CASE_STATE = {
+    passed: ['✓', 'Passed'], failed: ['✗', 'Failed'], error: ['✗', 'Error'],
+    timeout: ['✗', 'Timed out'], 'not-run': ['–', 'Not run'],
+  };
+  const NOT_RUN_WHY = {
+    error: 'Tests did not run because your code raised an error (see Console Output above). Fix it and run again.',
+    timeout: 'Tests did not run because your code timed out.',
+    crash: 'Tests did not run because Python stopped unexpectedly.',
+    'load-error': 'Tests did not run because Python could not be loaded.',
+    stopped: 'Python was restarted after a case timed out, so the remaining cases did not run.',
+  };
+  function testsHTML(t) {
+    const ran = t.total - t.notRun;
+    const all = t.passed === t.total;
+    const summary = ran === 0 ? 'Tests not run'
+      : `Passed ${t.passed}/${plural(t.total, 'test')}${all ? '!' : ''}${t.notRun ? ` · ${t.notRun} not run` : ''}`;
+    const why = t.reason && NOT_RUN_WHY[t.reason] ? `<p class="run-msg">${NOT_RUN_WHY[t.reason]}</p>` : '';
+    const block = (label, text, cls) => `<div class="case-k">${label}</div><pre class="case-v${cls ? ` ${cls}` : ''}">${esc(text)}</pre>`;
+    const trim = (x) => String(x || '').replace(/\n$/, '');
+    const cases = t.cases.map((c, i) => {
+      const [mark, word] = CASE_STATE[c.status] || CASE_STATE['not-run'];
+      let body;
+      if (c.status === 'not-run') body = block('Input', c.input);
+      else if (c.status === 'timeout') body = `${block('Input', c.input)}<p class="run-msg">Stopped after ${Math.round(RUNNER.config.RUN_TIMEOUT_MS / 1000)} seconds: this case may cause an infinite loop.</p>`;
+      else if (!c.examples.length) body = `${block('Input', c.input)}${c.error ? block('Error', c.error, 'run-err') : ''}`;
+      else {
+        body = c.examples.map((x) => `<div class="case-ex${x.ok ? '' : ' case-ex-bad'}">
+          ${block('Input', x.source.replace(/\n$/, '').split('\n').map((l, j) => (j ? '... ' : '>>> ') + l).join('\n'))}
+          ${block('Expected', trim(x.want) || '(no output)')}
+          ${block('Actual', trim(x.got) || (x.error ? '(raised an error)' : '(no output)'), x.ok ? '' : 'case-bad')}
+          ${x.truncated ? '<p class="run-msg">Output was cut off.</p>' : ''}
+          ${x.error ? block('Error', x.error, 'run-err') : ''}
+        </div>`).join('');
+      }
+      return `<details class="case st-case-${c.status}" data-case="${i}">
+        <summary><span class="case-mark" aria-hidden="true">${mark}</span> ${esc(c.name)} <span class="case-state">${word}</span></summary>
+        <div class="case-body">${body}</div>
+      </details>`;
+    }).join('');
+    return `<div class="run-tests" id="run-tests">
+      <div class="run-label">Test Results</div>
+      <p class="tests-summary ${ran && all ? 'tests-all' : 'tests-some'}" id="tests-summary">${summary}</p>
+      ${why}
+      <div class="cases">${cases}</div>
+      <p class="tests-note">Verified tests for this question. Practice feedback only: running them never changes your answers or scores.</p>
+    </div>`;
+  }
+  const RUN_STATUS = {
+    loading: 'Loading Python… (the first run downloads it; this can take a few seconds)',
+    running: 'Running…',
+    testing: 'Running tests…',
+    ok: 'Completed',
+    error: 'Error',
+    timeout: 'Timed out',
+    'load-error': 'Couldn’t load Python',
+    crash: 'Python restarted',
+  };
+  // Refresh the run bar + console for the problem on screen, from the result stored for *this* session and problem.
+  function renderRunPanel() {
+    const slot = leftPid && document.getElementById(`run-slot-${leftPid}`);
+    if (!slot || slot.hidden) return;
+    const r = runs.get(runKey(cur(), leftPid));
+    const btn = slot.querySelector('#run-btn');
+    const status = slot.querySelector('#run-status');
+    const box = slot.querySelector('#run-console');
+    const mine = r && r.phase; // this workspace's run is in progress
+    btn.disabled = runBusy;
+    btn.setAttribute('aria-busy', String(!!mine));
+    btn.title = runBusy && !mine ? 'Another run is still in progress' : 'Run this code with Python in your browser';
+    const progress = mine && r.phase === 'testing' && r.progress ? ` (${r.progress.done + 1}/${r.progress.total})` : '';
+    const text = !r ? '' : mine ? RUN_STATUS[r.phase] + progress : `${RUN_STATUS[r.status]}${r.status === 'ok' || r.status === 'error' ? ` · ${r.ms} ms` : ''}`;
+    status.textContent = text;
+    status.className = `run-status${r && !mine ? ` st-${r.status}` : ''}`;
+    box.hidden = !r || !!mine;
+    box.innerHTML = r && !mine ? runOutputHTML(r) : '';
+  }
+  async function runCode() {
+    const s = cur();
+    const pid = leftPid;
+    if (!runnerAllowed(s) || !pid || runBusy) return;
+    const key = runKey(s, pid);
+    const code = runnableCode(pid); // read now: later edits belong to the next run
+    const suite = suiteFor(pid);
+    const tests = suite && { setup: suite.setup || '', cases: suite.cases.map((c) => ({ name: typeof c.name === 'string' ? c.name : '', input: c.input })) };
+    const id = ++runSeq;
+    runBusy = true;
+    runs.set(key, { id, phase: RUNNER.ready ? 'running' : 'loading' });
+    renderRunPanel();
+    const result = await RUNNER.run(code, {
+      tests,
+      onPhase: (phase, progress) => { const r = runs.get(key); if (r && r.id === id && r.phase) { r.phase = phase; r.progress = progress; renderRunPanel(); } },
+    });
+    runBusy = false;
+    if (runs.get(key) && runs.get(key).id === id) runs.set(key, Object.assign({ id }, result));
+    renderRunPanel(); // shows the result only if this question is still on screen; otherwise it waits for it
+    const t = result.tests;
+    const testsSaid = !t ? '' : t.total - t.notRun ? ` Passed ${t.passed} of ${plural(t.total, 'test')}.` : ' Tests not run.';
+    if (runKey(cur(), leftPid) === key) announce(`Run finished: ${RUN_STATUS[result.status]}.${testsSaid}`);
   }
   // Build the left pane for a group. Runs only when the group changes, so annotations, the editor,
   // the text selection and the scroll position are never wiped by ordinary re-renders.
@@ -1253,6 +1415,7 @@
     leftObserver.observe(art);
     blocks(art).forEach((b) => leftObserver.observe(b));
     updateToolbar();
+    renderRunPanel();
   }
 
   function renderChoices(q, s) {
@@ -1890,6 +2053,7 @@
         }
         return;
       }
+      case 'run-code': runCode(); return;
       case 'goto-insights': {
         const el = document.getElementById('insights');
         if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); el.focus({ preventScroll: true }); }

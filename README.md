@@ -31,6 +31,11 @@ To deploy, upload the `app/` folder to any static host (Netlify drop, Vercel, Gi
   - Code questions (the A+ problems) are self-check only.
 - **Timer:** works from timestamps, so it stays accurate across tab switches and reloads. It has pause, resume, reset, and hide. At 00:00 it shows a banner, and your answers are kept.
 - **Navigator:** a "Question N of M" popover showing which questions are answered, unanswered, or marked for review. Keyboard: `←`/`→` move between questions, `M` marks for review.
+- **Run Code:** in Practice Mode and in the editable exam review, **Run Code** under the scratch editor runs the code with Python in your browser ([Pyodide](https://pyodide.org) 0.26.4 in a Web Worker) and shows the console output and any error. It runs exactly what the editor shows, with your current answers in the blanks; an unanswered blank fails as a syntax error. Each run starts with fresh globals, and a run is stopped after 5 seconds (the worker is restarted). Running is feedback only: it never changes answers, grades or scores, and it is turned off during a live exam.
+- **Verified tests:** when a question has a *verified* test suite in `app/data/test_suites.js`, the same Run Code click also runs its doctest cases and shows PrairieLearn-style results ("Passed 3/5 tests", with expandable Input / Expected / Actual per case). Each case runs in a fresh namespace; a case that runs over 5 seconds is marked "Timed out" and the remaining cases "Not run" (never counted as passed). Questions without a verified suite show Console Output only. No suites ship yet: the verified test bank is Phase 6C.
+  - Needs an internet connection the first time: Python (about 10 MB) is downloaded from the jsDelivr CDN, then cached by the browser. It works both when the site is served and when `index.html` is opened directly.
+  - Code that uses the course's `Link` or `Tree` classes needs those definitions in the editor; the runner doesn't add them.
+  - The worker keeps student code off the page and away from saved data, but it is not a security sandbox (code can still make network requests).
 - **Saving:** everything is stored in `localStorage`. The home page offers **Resume Practice** and **Start Over**.
 - **Results:** counts of completed, correct, incorrect, not graded, and unanswered questions, plus time spent. You can retry the missed questions or jump back to any one.
 
@@ -41,9 +46,13 @@ app/
   index.html          page shell
   styles.css          all styling (light, exam-style)
   app.js              screens, state, timer, grading, scratch editor, persistence
+  runner.js           Run Code: Pyodide in a Web Worker (lazy load, timeout, fresh globals per run)
   assets/             landing image
   vendor/codemirror/  CodeMirror 5.65 (bundled locally, so it works offline)
   data/questions.js   TOPICS, PROBLEMS (left-pane context), QUESTIONS, ANSWER_KEY (kept separate)
+  data/study_guides.js  Learning Insights study guides (examples checked with doctest)
+  data/test_suites.js   Verified Run Code test suites (schema documented in the file; empty until 6C)
+tests/                browser regression tests (see tests/README.md); not deployed
 ```
 
 ### Adding questions

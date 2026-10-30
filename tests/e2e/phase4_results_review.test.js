@@ -212,7 +212,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   await click(`.hist-row[data-id="${A1.id}"]`);
   await click('.actions [data-action="exam-review"]');
   await page.waitForSelector('#review-work .part');
-  ok(!(await page.$$eval('button', (bs) => bs.some((b) => /run code|run tests/i.test(b.textContent)))) && await page.$eval('.run-slot', (e) => e.hidden), 'no Run Code button; Phase 6 slot reserved and hidden');
+  ok(await page.$$eval('button', (bs) => bs.filter((b) => /run code/i.test(b.textContent)).length) === 1 && !(await page.$$eval('button', (bs) => bs.some((b) => /run tests|save & grade/i.test(b.textContent)))), 'review: exactly one Run Code button (Phase 6A), no Run Tests / Save & Grade');
   await page.screenshot({ path: `${OUT}/p4-review.png` });
 
   // ── responsive ──

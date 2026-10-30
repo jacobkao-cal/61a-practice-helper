@@ -22,6 +22,8 @@ to test a served copy. `npm run test:guides` needs `python3`.
 | `phase4_results_review` | auto-graded score, learning insights, editable review isolation |
 | `session_isolation` | annotations / code / answers scoped to each practice set |
 | `phase5a_qa` | damaged saved data, grading audit, Go to Home, two open tabs, Phase 6 readiness |
+| `phase6a_runner` | Run Code: output, errors, timeout + recovery, isolation, stale results, review safety (needs internet for Pyodide) |
+| `phase6b_tests` | Verified tests (fixture suites, test-only): Passed X/Y, per-case details, not-run cases, case timeout, isolation, unverified suites ignored, exam/review safety |
 | `study_guides_doctest` | every study-guide example runs and prints what it shows |
 
 Each suite prints one `PASS`/`FAIL` line per check and exits non-zero on failure.
