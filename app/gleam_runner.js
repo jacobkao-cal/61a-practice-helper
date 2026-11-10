@@ -107,6 +107,7 @@
     };
     console.log = console.info = console.warn = console.error = console.debug = capture;
 
+    let inspect = null; // gleam/string.inspect: shows a value the way Gleam prints it
     function formatError(e) {
       if (e && e.gleam_error) {
         const where = typeof e.line === 'number' && !(typeof e.function === 'string' && e.function.startsWith('cs61a_case_'))
@@ -114,7 +115,12 @@
         const kind = { assert: 'Assertion failed', panic: 'panic', todo: 'todo', let_assert: 'let assert failed' }[e.gleam_error] || e.gleam_error;
         let msg = String(e.message || '').replace(/\.$/, '');
         if (msg.toLowerCase() === kind.toLowerCase() + '' || msg === 'Assertion failed') msg = '';
-        return `${kind}${msg ? `: ${msg}` : ''}${where}`;
+        // `assert a == b` reports both sides' values, like doctest's Expected / Got.
+        let sides = '';
+        if (e.gleam_error === 'assert' && e.kind === 'binary_operator' && e.left && e.right && inspect) {
+          try { sides = `\n  left:  ${inspect(e.left.value)}\n  right: ${inspect(e.right.value)}`; } catch (err) { sides = ''; }
+        }
+        return `${kind}${msg ? `: ${msg}` : ''}${where}${sides}`;
       }
       if (e instanceof RangeError && /call stack/i.test(e.message)) return 'Error: recursion too deep (the call stack ran out). Check that every recursive call gets closer to a base case.';
       return `${(e && e.name) || 'Error'}: ${(e && e.message) || String(e)}`;
@@ -164,6 +170,7 @@
       Object.keys(files).forEach((f) => { own[f] = blobUrl(link(files[f])); made.push(own[f]); });
       const url = blobUrl(link(js));
       made.push(url);
+      if (!inspect) inspect = (await import(facade('gleam/string.mjs'))).inspect;
       try {
         return { error: null, module: await import(url) };
       } finally {
