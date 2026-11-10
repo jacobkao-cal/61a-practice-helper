@@ -46,32 +46,38 @@
     return -1;
   }
   const TOP_STMT = /^(assert|echo|let)\b/;
-  // Wraps top-level statements in `pub fn cs61a_top_N() { ... }` without changing the number of lines.
+  // Wraps each run of top-level statements in `pub fn cs61a_top_N() { ... }` without changing the number of lines.
+  // A run is consecutive statements, with blank and comment lines allowed between them, so a `let` is visible to the
+  // asserts after it. A statement continues on indented lines and while brackets are open; a line at column 0 that
+  // doesn't start a statement (fn, pub, type, import, ...) ends the run. ` Nil` closes the function body, so a run may
+  // end with a `let`.
   function wrapTopLevel(code) {
     const lines = code.split('\n');
     const state = { depth: 0, str: false };
     const tops = [];
-    let open = null; // { name, last, commentAt } for the statement being collected
+    let open = null; // { last, commentAt }: the last code line of the run being collected
     const close = () => {
       const { last, commentAt } = open;
-      lines[last] = commentAt >= 0 ? `${lines[last].slice(0, commentAt).replace(/\s+$/, '')} } ${lines[last].slice(commentAt)}` : `${lines[last]} }`;
+      lines[last] = commentAt >= 0
+        ? `${lines[last].slice(0, commentAt).replace(/\s+$/, '')} Nil } ${lines[last].slice(commentAt)}`
+        : `${lines[last]} Nil }`;
       open = null;
     };
     for (let n = 0; n < lines.length; n++) {
       const line = lines[n];
       const atTop = state.depth === 0 && !state.str;
-      if (open && atTop && (line.trim() === '' || !/^\s/.test(line))) close();
+      const blankOrComment = line.trim() === '' || line.trim().startsWith('//');
+      if (open && atTop && !blankOrComment && !/^\s/.test(line) && !TOP_STMT.test(line)) close();
+      let prefix = '';
       if (!open && atTop && TOP_STMT.test(line)) {
         const name = `cs61a_top_${tops.length}`;
         tops.push(name);
-        lines[n] = `pub fn ${name}() { ${line}`;
-        open = { name, last: n, commentAt: -1 };
-        const at = scanLine(line, state);
-        open.commentAt = at >= 0 ? at + `pub fn ${name}() { `.length : -1;
-        continue;
+        prefix = `pub fn ${name}() { `;
+        lines[n] = prefix + line;
+        open = { last: n, commentAt: -1 };
       }
       const at = scanLine(line, state);
-      if (open && line.trim() !== '') { open.last = n; open.commentAt = at; }
+      if (open && !blankOrComment) { open.last = n; open.commentAt = at >= 0 ? at + prefix.length : -1; }
     }
     if (open) close();
     return { source: lines.join('\n'), tops };
@@ -130,10 +136,11 @@
       return facades[path];
     }
 
-    function compile(source) {
+    function compile(source, files) {
       g.reset_filesystem(PID);
       Object.keys(assets.modules).forEach((m) => g.write_module(PID, m, assets.modules[m]));
       Object.keys(assets.files).forEach((f) => g.write_file(PID, `/src/${f}`, assets.files[f]));
+      Object.keys(files).forEach((f) => g.write_file(PID, `/src/${f}`, files[f]));
       g.write_module(PID, 'your_code', source);
       try {
         g.compile_package(PID, 'javascript');
@@ -144,18 +151,23 @@
       return { error: null };
     }
 
-    async function load(source) {
-      const c = compile(source);
+    // files: the problem's own JavaScript (FFI) files, e.g. { 'fib_ffi.mjs': '...' }, imported by @external functions.
+    async function load(source, files) {
+      const c = compile(source, files);
       if (c.error) return c;
       const js = g.read_compiled_javascript(PID, 'your_code');
       if (js == null) return { error: 'The compiler produced no JavaScript for your code.' };
-      // your_code.mjs sits at the package root, so its imports are "./gleam.mjs", "./gleam/list.mjs", ...
-      const linked = js.replace(/(\bfrom\s*|\bimport\s*)(["'])\.\/([^"']+)\2/g, (m, kw, q, p) => `${kw}${q}${facade(p)}${q}`);
-      const url = blobUrl(linked);
+      // your_code.mjs and the FFI files sit at the package root, so their imports are "./gleam.mjs", "./x_ffi.mjs", ...
+      const made = [];
+      const own = {};
+      const link = (text) => text.replace(/(\bfrom\s*|\bimport\s*)(["'])\.\/([^"']+)\2/g, (m, kw, q, p) => `${kw}${q}${own[p] || facade(p)}${q}`);
+      Object.keys(files).forEach((f) => { own[f] = blobUrl(link(files[f])); made.push(own[f]); });
+      const url = blobUrl(link(js));
+      made.push(url);
       try {
         return { error: null, module: await import(url) };
       } finally {
-        URL.revokeObjectURL(url);
+        made.forEach((u) => URL.revokeObjectURL(u));
       }
     }
 
@@ -185,10 +197,10 @@
         let error = null;
         let testsError = null; // why the tests can't run, when the code with the tests doesn't compile
         try {
-          let r = m.withTests ? await load(m.full) : await load(m.plain);
+          let r = m.withTests ? await load(m.full, m.files) : await load(m.plain, m.files);
           if (r.error && m.withTests) {
             testsError = r.error;
-            r = await load(m.plain);
+            r = await load(m.plain, m.files);
           }
           if (r.error) error = r.error;
           else {
@@ -284,7 +296,7 @@
     return { total: cases.length, passed: 0, notRun: cases.length, reason, cases };
   }
 
-  async function execute(code, onPhase, tests) {
+  async function execute(code, onPhase, tests, files, runMs) {
     const t0 = performance.now();
     const base = { stdout: '', error: null, truncated: false };
     if (!worker) onPhase('loading');
@@ -299,7 +311,7 @@
     onPhase('running');
     const plain = buildSource(code, null);
     const full = tests ? buildSource(code, tests.cases.map((c) => c.input)) : plain;
-    const m = await request(w, { type: 'run', id: ++seq, plain: plain.source, full: full.source, withTests: !!tests, tops: plain.tops, limit: config.OUTPUT_LIMIT }, config.RUN_TIMEOUT_MS);
+    const m = await request(w, { type: 'run', id: ++seq, plain: plain.source, full: full.source, withTests: !!tests, tops: plain.tops, files, limit: config.OUTPUT_LIMIT }, runMs);
     const r = Object.assign(base,
       m.type === 'timeout' ? { status: 'timeout', ms: m.ms }
         : m.type === 'crash' ? { status: 'crash', message: m.message, ms: m.ms }
@@ -319,7 +331,7 @@
       if (!worker) { summary.reason = 'stopped'; break; }
       onPhase('testing', { done: i, total: summary.cases.length });
       const c = summary.cases[i];
-      const res = await request(worker, { type: 'test', id: ++seq, index: i, limit: config.OUTPUT_LIMIT }, config.RUN_TIMEOUT_MS);
+      const res = await request(worker, { type: 'test', id: ++seq, index: i, limit: config.OUTPUT_LIMIT }, runMs);
       summary.notRun--;
       c.ms = res.ms;
       if (res.type === 'timeout') { c.status = 'timeout'; continue; }
@@ -340,7 +352,10 @@
     run(code, opts) {
       const onPhase = (opts && opts.onPhase) || (() => {});
       const tests = opts && opts.tests && Array.isArray(opts.tests.cases) && opts.tests.cases.length ? opts.tests : null;
-      const p = chain.then(() => execute(String(code), onPhase, tests));
+      const files = opts && opts.files && typeof opts.files === 'object' ? opts.files : {};
+      // timeoutMs: a longer limit for one problem whose intended program is slow (data/gleam_questions.js RUN_LIMITS)
+      const runMs = opts && Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0 ? opts.timeoutMs : config.RUN_TIMEOUT_MS;
+      const p = chain.then(() => execute(String(code), onPhase, tests, files, runMs));
       chain = p.catch(() => {});
       return p;
     },
