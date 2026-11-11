@@ -78,7 +78,7 @@ window.CS61A_TOUR = (function () {
     dgStep('dg-list', 'Make a list', '<p>Pick <b>New list</b> and click where the list goes. <b>+</b> adds a cell, <b>−</b> removes the last one. Click a cell to type in it.</p>', 'list'),
     dgStep('dg-arrow', 'Connect with an arrow', '<p>Pick <b>Arrow</b>, click the value it starts from, then click what it points to. The end follows your cursor until you click, and snaps into place.</p>', 'arrow'),
     { id: 'insights', find: one('#insights'), title: 'Learning insights',
-      html: '<p>After an exam, this shows the topics behind the parts you missed, with study-guide notes (for topics that have a guide; Gleam topics don’t yet) and similar questions to practice.</p>' },
+      html: '<p>After an exam, this shows the topics behind the parts you missed, with study-guide notes for each and similar questions to practice.</p>' },
   ];
 
   // From app.js: hold(true) pauses a running countdown while a tip is up; directions(open) shows or hides the
