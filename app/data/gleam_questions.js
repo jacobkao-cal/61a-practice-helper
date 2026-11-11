@@ -7,7 +7,9 @@
 // Sources: the TA exam-prep worksheets (with official solutions) and the lecture slides' Example / Exercise
 // problems, whose answers are on the slide that follows each one. Lab, homework and discussion questions are not
 // included yet (no solutions). Two parts asked together on a worksheet ("Fill in blanks (a) and (b)") are separate
-// parts here, each graded on its own; such parts show no points of their own, and the problem shows its printed total.
+// parts here, each graded on its own.
+// Points (decided with Jacob): every part of a worksheet question is worth 1 point, and a question is worth as many
+// points as it has parts, so the totals differ from the worksheets' printed points.
 // Topics, difficulty levels and explanations were written for this site (see docs/difficulty-guide.md) and have not
 // been reviewed by course staff.
 //
@@ -42,7 +44,7 @@ window.CS61A_GLEAM_BANK = (function () {
   const PROBLEMS = {
     // ───────────────────────────── Exam Prep Week 11 ─────────────────────────────
     'gl-ep11-2': {
-      exam: 'gl-ep11', number: '2', title: 'Beadazzled, the Gleam-quel', points: 6,
+      exam: 'gl-ep11', number: '2', title: 'Beadazzled, the Gleam-quel', points: 5,
       intro: '*Adapted from Spring 2022 Final, Question 11 · Level: Challenge*\n\nImplement `make_necklace`, which returns a Gleam list whose values repeat the items in `beads` in order until the result has `length` elements. Assume `beads` is non-empty and `length` is non-negative.\n\n`list.append(xs, ys)` returns a new list containing the elements of `xs` followed by the elements of `ys`.',
       code: code(`
 import gleam/list
@@ -65,7 +67,7 @@ assert make_necklace([">", "0", "<"], 9)
 `),
     },
     'gl-ep11-3a': {
-      exam: 'gl-ep11', number: '3', title: 'Listquality, Part A: all', points: 2,
+      exam: 'gl-ep11', number: '3', title: 'Listquality, Part A: all', points: 3,
       intro: '*Adapted from past exam practice (Treequality) · Level: Regular*\n\nImplement `all`, which returns `True` when every Boolean in `s` is `True`, including when `s` is empty, and returns `False` otherwise.',
       code: code(`
 pub fn all(s: List(Bool)) -> Bool {
@@ -81,7 +83,7 @@ assert all([]) == True
 `),
     },
     'gl-ep11-3b': {
-      exam: 'gl-ep11', number: '3', title: 'Listquality, Part B: zip', points: 2,
+      exam: 'gl-ep11', number: '3', title: 'Listquality, Part B: zip', points: 3,
       intro: '*Adapted from past exam practice (Treequality) · Level: Regular*\n\nImplement `zip`, which combines two lists into a list of two-element tuples. If the inputs have different lengths, stop when the shorter list runs out. The type variables may differ, so the two input lists do not need to contain the same type.',
       code: code(`
 pub fn zip(s0: List(a), s1: List(b)) -> List(#(a, b)) {
@@ -101,7 +103,7 @@ assert zip(["a", "b"], [1, 2, 3]) == [#("a", 1), #("b", 2)]
 `),
     },
     'gl-ep11-4': {
-      exam: 'gl-ep11', number: '4', title: 'Split Decision', points: 6,
+      exam: 'gl-ep11', number: '4', title: 'Split Decision', points: 4,
       intro: '*Adapted from Summer 2026, 6B (split) · Level: Regular*\n\nImplement `split` tail recursively. It takes a list `s` and a predicate `pred`, then returns a tuple containing two lists: items that satisfy `pred` and items that do not. Each result list is in reverse order because items are added to the front of an accumulator.',
       code: code(`
 pub fn split(
@@ -157,7 +159,7 @@ assert rotate([1, 2, 3, 4, 5], 7) == [3, 4, 5, 1, 2]
 `),
     },
     'gl-ep11-6': {
-      exam: 'gl-ep11', number: '6', title: 'Don\'t Skip This', points: 6,
+      exam: 'gl-ep11', number: '6', title: 'Don\'t Skip This', points: 3,
       intro: '*Adapted from Fall 2023 Final, Question 7 (part) · Level: Challenge*\n\n**Definition.** A *skip-partition* of a positive integer `n` is a list of positive integers in increasing order that sums to `n` and does not contain any duplicates or consecutive numbers.\n\nImplement `part`, which takes positive integers `n` and `m`. It returns a list of all skip-partitions of `n` whose elements are all greater than or equal to `m`. The provided `start_with` function may be used in the implementation.',
       code: code(`
 import gleam/list
@@ -185,7 +187,7 @@ assert part(10, 1)
 `),
     },
     'gl-ep11-7': {
-      exam: 'gl-ep11', number: '7', title: 'After Party', points: 5,
+      exam: 'gl-ep11', number: '7', title: 'After Party', points: 2,
       intro: '*Adapted from Fall 2023 Midterm 2, Question 6 (after) · Level: Challenge*\n\nImplement `after`, which takes a list `s` and values `a` and `b`. It returns whether an element of `s` equal to `b` appears after an element of `s` equal to `a`.',
       code: code(`
 pub fn after(s: List(t), a: t, b: t) -> Bool {
@@ -208,7 +210,7 @@ assert after([3, 6, 5, 4], 6, 6) == False
 
     // ───────────────────────────── Exam Prep Week 12 ─────────────────────────────
     'gl-ep12-2': {
-      exam: 'gl-ep12', number: '2', title: 'No More Folders!!', points: 2,
+      exam: 'gl-ep12', number: '2', title: 'No More Folders!!', points: 4,
       intro: '*Level: Regular*\n\nAn `Entry` value is either a `File` containing its name or a `Folder` containing a list of entries. Implement `list_files`, which takes in a list of `Entry` records `entries` and returns a list of strings which are the file names of every file in `entries`.',
       code: code(`
 import gleam/list
@@ -253,7 +255,7 @@ assert list_files(entry_list2) == ["a.txt", "b.txt", "c.txt", "d.txt"]
 `),
     },
     'gl-ep12-3': {
-      exam: 'gl-ep12', number: '3', title: 'Online Learning Site', points: 8,
+      exam: 'gl-ep12', number: '3', title: 'Online Learning Site', points: 11,
       intro: '*Adapted from Spring 2021 Midterm 2, Question 5 · Level: Regular-Hard*\n\nAn online learning site is described by the `LearningSite` record, which keeps track of the following information:\n\n- `catalog`: a dictionary of the published content, keyed by title\n- `watched`: a list of `Content` records that students have opened, in the order they opened them. The first element is the first content viewed.\n- `missing`: a list of titles that students asked for but could not be found. The most recently searched title should be at the front of the list.\n\nBoth exercises and videos have a title and an author, so they share a `Details` record. Additionally, the `watched` and `missing` lists may contain duplicates if content is viewed or searched more than once.\n\nImplement the following functions for the online learning site:\n\n- `publish(s, content)`: adds `content` to the `LearningSite` catalog\n- `view(s, title)`: a student views the content with `title`. If the catalog has this content, add the content object to the end of the `watched` list. If not, add the title to the front of the `missing` list.\n- `watch_list(s)`: return the description of each watched content, in the order watched.\n- `count_videos(s)`: return how many of the watched contents are videos. A video that was watched twice counts twice.',
       code: code(`
 import gleam/dict.{type Dict}
@@ -341,7 +343,7 @@ assert count_videos(cs61a) == 3
 `),
     },
     'gl-ep12-4': {
-      exam: 'gl-ep12', number: '4', title: 'Making Pen Friends!', points: 5,
+      exam: 'gl-ep12', number: '4', title: 'Making Pen Friends!', points: 6,
       intro: '*Adapted from Spring 2026 Midterm 2, Question 5 · Level: Challenge*\n\nA `Pen` has a name and a dict that maps each animal\'s name to its `Animal` record. An `Animal` has a unique name and a list of the names of its friends. Two animals may only become friends if they are in the same pen. When they do, each one\'s name is added to the front of the other\'s list of friends.\n\nImplement `add_animal`, which returns a new pen that also holds an animal named `name` with no friends. Then implement `befriend`, which returns `Ok` of a new pen in which the animals named `a` and `b` are friends, or an `Error` if either animal is not in `pen`.',
       code: code(`
 import gleam/dict.{type Dict}
@@ -609,58 +611,58 @@ pub fn remove_leaf(tree: Tree(a)) -> Tree(a) {
   const sa = 'short_answer';
   const QUESTIONS = [
     // Exam Prep Week 11
-    Q('gl-ep11-2a', 'gl-ep11-2', '(a)', null, ['gl-lists'], 'medium', 'a', sa, 'Fill in blank (a). *(Blanks (a) and (b) are one 2-point question on the worksheet.)*'),
-    Q('gl-ep11-2b', 'gl-ep11-2', '(b)', null, ['gl-lists'], 'easy', 'b', sa, 'Fill in blank (b).'),
+    Q('gl-ep11-2a', 'gl-ep11-2', '(a)', 1, ['gl-lists'], 'medium', 'a', sa, 'Fill in blank (a). *(On the worksheet, blanks (a) and (b) are asked together.)*'),
+    Q('gl-ep11-2b', 'gl-ep11-2', '(b)', 1, ['gl-lists'], 'easy', 'b', sa, 'Fill in blank (b).'),
     Q('gl-ep11-2c', 'gl-ep11-2', '(c)', 1, ['gl-lists'], 'easy', 'c', sa, 'Fill in blank (c).'),
-    Q('gl-ep11-2d', 'gl-ep11-2', '(d)', 2, ['gl-lists', 'gl-recursion'], 'hard', 'd', sa, 'Fill in blank (d).'),
+    Q('gl-ep11-2d', 'gl-ep11-2', '(d)', 1, ['gl-lists', 'gl-recursion'], 'hard', 'd', sa, 'Fill in blank (d).'),
     Q('gl-ep11-2e', 'gl-ep11-2', '(e)', 1, ['gl-recursion'], 'easy', 'e', sa, 'Fill in blank (e).'),
 
     Q('gl-ep11-3a', 'gl-ep11-3a', '(a)', 1, ['gl-recursion'], 'easy', 'a', 'single_choice', 'Fill in blank (a).', { mono: true, choices: ['True', '[]', 'False', 'Nil'] }),
-    Q('gl-ep11-3b', 'gl-ep11-3a', '(b)', null, ['gl-lists'], 'easy', 'b', sa, 'Fill in blank (b). *(Blanks (b) and (c) are one 1-point question on the worksheet.)*'),
-    Q('gl-ep11-3c', 'gl-ep11-3a', '(c)', null, ['gl-lists', 'gl-recursion'], 'easy', 'c', sa, 'Fill in blank (c).'),
+    Q('gl-ep11-3b', 'gl-ep11-3a', '(b)', 1, ['gl-lists'], 'easy', 'b', sa, 'Fill in blank (b). *(On the worksheet, blanks (b) and (c) are asked together.)*'),
+    Q('gl-ep11-3c', 'gl-ep11-3a', '(c)', 1, ['gl-lists', 'gl-recursion'], 'easy', 'c', sa, 'Fill in blank (c).'),
     Q('gl-ep11-3d', 'gl-ep11-3b', '(d)', 1, ['gl-lists'], 'easy', 'd', sa, 'Fill in blank (d).'),
-    Q('gl-ep11-3e', 'gl-ep11-3b', '(e)', null, ['gl-recursion'], 'easy', 'e', sa, 'Fill in blank (e). *(Blanks (e) and (f) are one 1-point question on the worksheet.)*'),
-    Q('gl-ep11-3f', 'gl-ep11-3b', '(f)', null, ['gl-recursion'], 'easy', 'f', sa, 'Fill in blank (f).'),
+    Q('gl-ep11-3e', 'gl-ep11-3b', '(e)', 1, ['gl-recursion'], 'easy', 'e', sa, 'Fill in blank (e). *(On the worksheet, blanks (e) and (f) are asked together.)*'),
+    Q('gl-ep11-3f', 'gl-ep11-3b', '(f)', 1, ['gl-recursion'], 'easy', 'f', sa, 'Fill in blank (f).'),
 
     Q('gl-ep11-4a', 'gl-ep11-4', '(a)', 1, ['gl-recursion'], 'medium', 'a', sa, 'Fill in blank (a).'),
     Q('gl-ep11-4b', 'gl-ep11-4', '(b)', 1, ['gl-recursion', 'gl-lists'], 'easy', 'b', sa, 'Fill in blank (b).'),
-    Q('gl-ep11-4c', 'gl-ep11-4', '(c)', 2, ['gl-recursion', 'gl-hof'], 'medium', 'c', sa, 'Fill in blank (c).'),
-    Q('gl-ep11-4d', 'gl-ep11-4', '(d)', 2, ['gl-recursion', 'gl-hof'], 'medium', 'd', sa, 'Fill in blank (d).'),
+    Q('gl-ep11-4c', 'gl-ep11-4', '(c)', 1, ['gl-recursion', 'gl-hof'], 'medium', 'c', sa, 'Fill in blank (c).'),
+    Q('gl-ep11-4d', 'gl-ep11-4', '(d)', 1, ['gl-recursion', 'gl-hof'], 'medium', 'd', sa, 'Fill in blank (d).'),
 
     Q('gl-ep11-5a', 'gl-ep11-5', '(a)', 1, ['gl-recursion'], 'easy', 'a', sa, 'Fill in blank (a).'),
     Q('gl-ep11-5b', 'gl-ep11-5', '(b)', 1, ['gl-lists'], 'easy', 'b', 'single_choice', 'Fill in blank (b).', { mono: true, choices: ['list.append', 'list.length', 'list.filter'] }),
-    Q('gl-ep11-5c', 'gl-ep11-5', '(c)', null, ['gl-lists'], 'easy', 'c', sa, 'Fill in blank (c). *(Blanks (c) and (d) are one 2-point question on the worksheet.)*'),
-    Q('gl-ep11-5d', 'gl-ep11-5', '(d)', null, ['gl-lists'], 'medium', 'd', sa, 'Fill in blank (d).'),
+    Q('gl-ep11-5c', 'gl-ep11-5', '(c)', 1, ['gl-lists'], 'easy', 'c', sa, 'Fill in blank (c). *(On the worksheet, blanks (c) and (d) are asked together.)*'),
+    Q('gl-ep11-5d', 'gl-ep11-5', '(d)', 1, ['gl-lists'], 'medium', 'd', sa, 'Fill in blank (d).'),
     Q('gl-ep11-5e', 'gl-ep11-5', '(e)', 1, ['gl-recursion'], 'easy', 'e', sa, 'Fill in blank (e).'),
 
-    Q('gl-ep11-6a', 'gl-ep11-6', '(a)', 2, ['gl-lists', 'gl-recursion'], 'medium', 'a', sa, 'Fill in blank (a).'),
-    Q('gl-ep11-6b', 'gl-ep11-6', '(b)', 2, ['gl-recursion'], 'hard', 'b', sa, 'Fill in blank (b).'),
-    Q('gl-ep11-6c', 'gl-ep11-6', '(c)', 2, ['gl-hof'], 'hard', 'c', sa, 'Fill in blank (c).'),
+    Q('gl-ep11-6a', 'gl-ep11-6', '(a)', 1, ['gl-lists', 'gl-recursion'], 'medium', 'a', sa, 'Fill in blank (a).'),
+    Q('gl-ep11-6b', 'gl-ep11-6', '(b)', 1, ['gl-recursion'], 'hard', 'b', sa, 'Fill in blank (b).'),
+    Q('gl-ep11-6c', 'gl-ep11-6', '(c)', 1, ['gl-hof'], 'hard', 'c', sa, 'Fill in blank (c).'),
 
-    Q('gl-ep11-7a', 'gl-ep11-7', '(a)', 4, ['gl-hof', 'gl-recursion'], 'hard', 'a', sa, 'Fill in blank (a). You may not use `case`, `&&`, `||`, `[`, or `]`.'),
+    Q('gl-ep11-7a', 'gl-ep11-7', '(a)', 1, ['gl-hof', 'gl-recursion'], 'hard', 'a', sa, 'Fill in blank (a). You may not use `case`, `&&`, `||`, `[`, or `]`.'),
     Q('gl-ep11-7b', 'gl-ep11-7', '(b)', 1, ['gl-recursion'], 'easy', 'b', sa, 'Fill in blank (b).'),
 
     // Exam Prep Week 12
-    Q('gl-ep12-2a', 'gl-ep12-2', '(a)', null, ['gl-types', 'gl-recursion'], 'medium', 'a', sa, 'Fill in blank (a). *(Blanks (a) and (b) are one 1-point question on the worksheet.)*'),
-    Q('gl-ep12-2b', 'gl-ep12-2', '(b)', null, ['gl-recursion'], 'easy', 'b', sa, 'Fill in blank (b).'),
-    Q('gl-ep12-2c', 'gl-ep12-2', '(c)', null, ['gl-types', 'gl-lists'], 'easy', 'c', sa, 'Fill in blank (c). *(Blanks (c) and (d) are one 1-point question on the worksheet.)*'),
-    Q('gl-ep12-2d', 'gl-ep12-2', '(d)', null, ['gl-recursion'], 'easy', 'd', sa, 'Fill in blank (d).'),
+    Q('gl-ep12-2a', 'gl-ep12-2', '(a)', 1, ['gl-types', 'gl-recursion'], 'medium', 'a', sa, 'Fill in blank (a). *(On the worksheet, blanks (a) and (b) are asked together.)*'),
+    Q('gl-ep12-2b', 'gl-ep12-2', '(b)', 1, ['gl-recursion'], 'easy', 'b', sa, 'Fill in blank (b).'),
+    Q('gl-ep12-2c', 'gl-ep12-2', '(c)', 1, ['gl-types', 'gl-lists'], 'easy', 'c', sa, 'Fill in blank (c). *(On the worksheet, blanks (c) and (d) are asked together.)*'),
+    Q('gl-ep12-2d', 'gl-ep12-2', '(d)', 1, ['gl-recursion'], 'easy', 'd', sa, 'Fill in blank (d).'),
 
     Q('gl-ep12-3a', 'gl-ep12-3', '(a)', 1, ['gl-dicts', 'gl-types'], 'medium', 'a', sa, 'Fill in blank (a).'),
     Q('gl-ep12-3b', 'gl-ep12-3', '(b)', 1, ['gl-dicts', 'gl-result'], 'easy', 'b', sa, 'Fill in blank (b).'),
     Q('gl-ep12-3c', 'gl-ep12-3', '(c)', 1, ['gl-types', 'gl-immutable'], 'medium', 'c', sa, 'Fill in blank (c).'),
     Q('gl-ep12-3d', 'gl-ep12-3', '(d)', 1, ['gl-types', 'gl-immutable'], 'medium', 'd', sa, 'Fill in blank (d).'),
     Q('gl-ep12-3e', 'gl-ep12-3', '(e)', 1, ['gl-hof'], 'medium', 'e', sa, 'Fill in blank (e).'),
-    Q('gl-ep12-3f', 'gl-ep12-3', '(f)', null, ['gl-hof'], 'easy', 'f', sa, 'Fill in blank (f). *(Blanks (f), (g) and (h) are one 1-point question on the worksheet.)*'),
-    Q('gl-ep12-3g', 'gl-ep12-3', '(g)', null, ['gl-hof'], 'easy', 'g', sa, 'Fill in blank (g).'),
-    Q('gl-ep12-3h', 'gl-ep12-3', '(h)', null, ['gl-hof'], 'medium', 'h', sa, 'Fill in blank (h).'),
+    Q('gl-ep12-3f', 'gl-ep12-3', '(f)', 1, ['gl-hof'], 'easy', 'f', sa, 'Fill in blank (f). *(On the worksheet, blanks (f), (g) and (h) are asked together.)*'),
+    Q('gl-ep12-3g', 'gl-ep12-3', '(g)', 1, ['gl-hof'], 'easy', 'g', sa, 'Fill in blank (g).'),
+    Q('gl-ep12-3h', 'gl-ep12-3', '(h)', 1, ['gl-hof'], 'medium', 'h', sa, 'Fill in blank (h).'),
     Q('gl-ep12-3i', 'gl-ep12-3', '(i)', 1, ['gl-types'], 'easy', 'i', sa, 'Fill in blank (i).'),
-    Q('gl-ep12-3j', 'gl-ep12-3', '(j)', null, ['gl-types'], 'medium', 'j', sa, 'Fill in blank (j). *(Blanks (j) and (k) are one 1-point question on the worksheet.)*'),
-    Q('gl-ep12-3k', 'gl-ep12-3', '(k)', null, ['gl-types'], 'easy', 'k', sa, 'Fill in blank (k).'),
+    Q('gl-ep12-3j', 'gl-ep12-3', '(j)', 1, ['gl-types'], 'medium', 'j', sa, 'Fill in blank (j). *(On the worksheet, blanks (j) and (k) are asked together.)*'),
+    Q('gl-ep12-3k', 'gl-ep12-3', '(k)', 1, ['gl-types'], 'easy', 'k', sa, 'Fill in blank (k).'),
 
     Q('gl-ep12-4a', 'gl-ep12-4', '(a)', 1, ['gl-dicts', 'gl-types'], 'medium', 'a', sa, 'Fill in blank (a).'),
-    Q('gl-ep12-4b', 'gl-ep12-4', '(b)', null, ['gl-dicts', 'gl-result'], 'medium', 'b', sa, 'Fill in blank (b). *(Blanks (b) and (c) are one 1-point question on the worksheet.)*'),
-    Q('gl-ep12-4c', 'gl-ep12-4', '(c)', null, ['gl-dicts', 'gl-result'], 'easy', 'c', sa, 'Fill in blank (c).'),
+    Q('gl-ep12-4b', 'gl-ep12-4', '(b)', 1, ['gl-dicts', 'gl-result'], 'medium', 'b', sa, 'Fill in blank (b). *(On the worksheet, blanks (b) and (c) are asked together.)*'),
+    Q('gl-ep12-4c', 'gl-ep12-4', '(c)', 1, ['gl-dicts', 'gl-result'], 'easy', 'c', sa, 'Fill in blank (c).'),
     Q('gl-ep12-4d', 'gl-ep12-4', '(d)', 1, ['gl-lists', 'gl-types'], 'easy', 'd', sa, 'Fill in blank (d).'),
     Q('gl-ep12-4e', 'gl-ep12-4', '(e)', 1, ['gl-dicts', 'gl-immutable'], 'hard', 'e', sa, 'Fill in blank (e).'),
     Q('gl-ep12-4f', 'gl-ep12-4', 'Q4.5', 1, ['gl-immutable', 'gl-dicts'], 'medium', null, sa, 'After `befriend(my_pen, "Clarice", "Alice")` in the asserts above, what does `dict.get(my_pen.animals, "Alice")` evaluate to?'),

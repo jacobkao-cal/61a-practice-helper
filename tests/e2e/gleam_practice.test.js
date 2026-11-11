@@ -71,8 +71,8 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   // ── Language picker ──
   await fresh();
   const langs = await page.$$eval('.lang-row .lang-opt', (b) => b.map((x) => ({ t: x.textContent.trim(), checked: x.getAttribute('aria-checked'), disabled: x.disabled })));
-  ok(langs.length === 3 && langs[0].t === 'Python' && langs[1].t === 'Gleam' && /^SQL\s*Coming soon$/.test(langs[2].t), `Language shows Python, Gleam and "SQL Coming soon" (${langs.map((l) => l.t).join(' | ')})`);
-  ok(langs[0].checked === 'true' && langs[1].checked === 'false' && langs[2].disabled, 'Python is chosen by default; SQL is greyed out and can’t be chosen');
+  ok(langs.length === 4 && langs[0].t === 'All' && langs[1].t === 'Python' && langs[2].t === 'Gleam' && /^SQL\s*Coming soon$/.test(langs[3].t), `Language shows All, Python, Gleam and "SQL Coming soon" (${langs.map((l) => l.t).join(' | ')})`);
+  ok(langs[1].checked === 'true' && langs[0].checked === 'false' && langs[2].checked === 'false' && langs[3].disabled, 'Python is chosen by default; SQL is greyed out and can’t be chosen');
   await openMenu('topics');
   let opts = await menuOptions('topics');
   ok(opts.length > 0 && opts.every((o) => P.TOPICS.some((t) => t.id === o.v)) && !opts.some((o) => o.v.startsWith('gl-')), 'with Python, Topics lists only Python topics');
@@ -208,18 +208,85 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   ok(await page.evaluate(() => document.querySelector('.CodeMirror').CodeMirror.getOption('mode') === 'python' && document.querySelector('.CodeMirror').CodeMirror.getOption('indentUnit') === 4), 'Python questions still use the Python editor mode with 4-space indents');
   ok((await text('.editor-file')).endsWith('.py') && /<code>#<\/code>|#/.test(await text('.editor-hint')), 'Python file name and # comment hint are unchanged');
 
-  // ── Exam Mode never shows Gleam ──
+  // ── Practice: Language "All" ──
+  await fresh();
+  await click('#lang-all');
+  const pyGroups = new Set(P.QUESTIONS.map((q) => q.problem)).size;
+  const allMatch = Number((await text('.start-row .summary b')));
+  ok(allMatch > gleamGroups && allMatch <= pyGroups + gleamGroups, `All matches Python and Gleam question groups together (${allMatch})`);
+  await openMenu('topics');
+  const groups = await page.$$eval('.dd-panel .dd-group', (g) => g.map((x) => x.textContent));
+  ok(groups.join() === 'Python,Gleam', 'with All, Topics lists Python topics, then Gleam topics, under headings');
+  ok((await menuOptions('topics')).length > 0 && (await menuOptions('glTopics')).length === G.TOPICS.length, 'both languages\' topics are listed');
+  await openMenu('topics');
+  await openMenu('exams');
+  ok((await text('[data-id="exams"] .dd-label')) === 'Exams & sources' && (await page.$$eval('.dd-panel .dd-group', (g) => g.length)) === 2, 'with All, the second menu is "Exams & sources", with both languages');
+  await openMenu('exams');
+  await page.$eval('#set-size', (i) => { i.value = String(200); i.dispatchEvent(new Event('change', { bubbles: true })); });
+  await wait(100);
+  await click('[data-action="start"]');
+  await page.waitForSelector('#problem-article');
+  s = await st();
+  ok(s.session.ids.some((id) => id.startsWith('gl-')) && s.session.ids.some((id) => !id.startsWith('gl-')), 'an All set (no topics chosen) holds both Python and Gleam questions');
+  ok(/^All languages · All topics$/.test(s.session.title), `the set is titled "${s.session.title}"`);
+  // choosing only a Gleam topic under All leaves out Python
+  await fresh();
+  await click('#lang-all');
+  await openMenu('topics');
+  await click('.dd-panel input[data-pref="glTopics"][value="gl-dicts"]');
+  await openMenu('topics');
+  ok((await text('.start-row .summary b')) === '2', 'under All, choosing only a Gleam topic matches only Gleam questions');
+
+  // ── Exam Mode: Gleam only in topic-based exams, worksheets only ──
   await fresh();
   await click('#mode-exam');
-  ok(!(await has('.lang-row')), 'Exam Mode has no Language picker (Exam Mode is unchanged)');
+  ok(!(await has('.lang-row')), 'Exam Mode has no Language picker');
   const examIds = await page.$$eval('input[name="exam-id"]', (els) => els.map((e) => e.value));
   ok(examIds.length === Object.keys(P.EXAMS).length && examIds.every((id) => P.EXAMS[id]), 'the full-exam list holds only the Python midterms');
   await click('#exam-kind-custom');
   await page.waitForSelector('#pick-list');
-  const picks = await page.$$eval('#pick-list [data-pick]', (els) => els.map((e) => e.dataset.pick));
-  ok(picks.length > 0 && picks.every((pid) => P.PROBLEMS[pid]) && !picks.some((pid) => pid.startsWith('gl-')), `the topic-based exam lists no Gleam question (${picks.length} Python groups)`);
-  const examTopics = await page.$$eval('.exam-setup [data-action="xtopic"]', (els) => els.map((e) => e.dataset.id));
-  ok(examTopics.length > 0 && examTopics.every((t) => P.TOPICS.some((x) => x.id === t)) && !examTopics.some((t) => t.startsWith('gl-')), `the exam topic filter has only Python topics (${examTopics.length})`);
+  const chips = await page.$$eval('.exam-setup [data-action="xtopic"]', (els) => els.map((e) => ({ id: e.dataset.id, t: e.textContent })));
+  ok(chips.length > 1 && chips[chips.length - 1].id === 'gleam' && chips[chips.length - 1].t === 'Gleam' && chips.slice(0, -1).every((c) => P.TOPICS.some((x) => x.id === c.id)), 'the topic chips are the Python topics, then one "Gleam" chip');
+  const worksheetPids = Object.keys(G.PROBLEMS).filter((pid) => G.SOURCES[G.PROBLEMS[pid].exam].kind === 'exam-prep');
+  await click('#xt-gleam');
+  let picks = await page.$$eval('#pick-list [data-pick]', (els) => els.map((e) => e.dataset.pick));
+  ok(picks.join() === worksheetPids.join(), `the Gleam chip lists exactly the ${worksheetPids.length} exam-prep worksheet questions (no lecture examples)`);
+  const row = await page.$eval('#pick-list [data-pick="gl-ep11-2"]', (e) => e.closest('.pick-row').textContent.replace(/\s+/g, ' '));
+  ok(/Exam Prep 11 — Q2/.test(row) && /5 parts · 5 pts/.test(row), `a Gleam question is worth 1 point per part ("${row.trim().slice(-30)}")`);
+  // mixing: pick a Gleam question, switch the filter, pick a Python one
+  await click('#pick-list [data-pick="gl-ep11-5"]');
+  await click('#xt-gleam');
+  await click('#xt-links');
+  await click('#pick-list [data-pick="fa25-4"]');
+  ok((await st()).examPrefs.picked.join() === 'gl-ep11-5,fa25-4', 'a topic-based exam can mix Gleam and Python questions');
+  await click('#exam-timer-off');
+  await click('[data-action="start-exam"]');
+  await page.waitForSelector('#pane-right .part');
+  s = await st();
+  ok(s.exam && s.exam.groups.map((g) => g.pid).join() === 'gl-ep11-5,fa25-4', 'the exam holds both questions, in pick order');
+  ok((await page.$$eval('.run-slot', (r) => r.every((x) => x.hidden))) && !(await has('#run-btn')), 'no Run Code during the exam (Gleam too)');
+  ok((await text('#problem-article h2')) === '5. (5.0 points)Rotation Situation', 'the Gleam question shows 5 points (1 per part)');
+  await typeAnswer('gl-ep11-5a', 'lst');
+  await click('input[data-qid="gl-ep11-5b"][value="0"]');
+  await typeAnswer('gl-ep11-5c', 'rest');
+  await typeAnswer('gl-ep11-5d', '[first, first]'); // wrong, but the code still finishes (a wrong (e) like `k` would loop forever)
+  await typeAnswer('gl-ep11-5e', 'k - 1');
+  await click('.p-footer [data-action="submit-exam"]');
+  await page.waitForSelector('.exam-results');
+  s = await st();
+  const att = s.attempts[s.attempts.length - 1];
+  ok(['gl-ep11-5a', 'gl-ep11-5b', 'gl-ep11-5c', 'gl-ep11-5e'].every((id) => att.graded[id] === 'correct') && att.graded['gl-ep11-5d'] === 'incorrect', 'Gleam parts are graded like Python ones (4 correct, 1 incorrect)');
+  const faPts = P.QUESTIONS.filter((q) => q.problem === 'fa25-4' && typeof q.points === 'number' && q.type !== 'code').reduce((t, q) => t + q.points, 0);
+  ok(att.score.earned === 4 && att.score.possible === 5 + faPts, `score counts each Gleam part as 1 point (${att.score.earned} / ${att.score.possible})`);
+  const resultsText = await text('.exam-results');
+  ok(/Rotation Situation/.test(resultsText) && /Exam Prep Week 11: Gleam and Linked Lists · Q5/.test(resultsText), 'results list the Gleam question with its worksheet');
+  ok(await page.$$eval('.rq-group', (gs) => !gs[0].querySelector('.rq-walk') && !!gs[1].querySelector('.rq-walk')), 'the Gleam group has no walkthrough link; the Python one keeps its link');
+  ok(/Lists & Pattern Matching/.test(await text('#insights')), 'Learning insights name the Gleam topic that was missed');
+  await click('.actions [data-action="exam-review"]');
+  await page.waitForSelector('#review-work .part');
+  ok((await page.$eval('.run-slot', (r) => r.dataset.lang)) === 'gleam' && await has('#run-btn') && !(await has('#tutor-btn')), 'in review, the Gleam question gets Gleam Run Code (no Python Tutor)');
+  r = await run();
+  ok(/Passed \d+\/6 tests/.test(r.tests) && r.tests !== 'Passed 6/6 tests!', `Run Code in review runs the submitted answers with Gleam (${r.tests})`);
 
   ok(errors.length === 0, `no page errors${errors.length ? `: ${errors.slice(0, 3).join(' | ')}` : ''}`);
   await browser.close();

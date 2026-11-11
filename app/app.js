@@ -21,6 +21,7 @@
   const topicById = (id) => ALL_TOPICS.find((t) => t.id === id);
   const isGleam = (pid) => Object.prototype.hasOwnProperty.call(GL.PROBLEMS, pid);
   const LANGS = [
+    { id: 'all', name: 'All' }, // every question of every available language
     { id: 'python', name: 'Python' },
     { id: 'gleam', name: 'Gleam' },
     { id: 'sql', name: 'SQL', soon: true },
@@ -39,6 +40,12 @@
   const QUESTIONS = ALL_QUESTIONS.filter(inScope);
   const GL_QUESTIONS = GL.QUESTIONS.filter(inScope);
   const EVERY_QUESTION = ALL_QUESTIONS.concat(GL.QUESTIONS); // id lookups and blank links, both languages
+  // Exam Mode: the Python bank, plus the Gleam exam-prep worksheets in topic-based exams only (the "Gleam" chip).
+  // Full past exams stay Python midterms. Gleam lecture examples are Practice Mode only.
+  const isExamPrep = (pid) => isGleam(pid) && GL.SOURCES[GL.PROBLEMS[pid].exam].kind === 'exam-prep';
+  const EXAM_QUESTIONS = QUESTIONS.concat(GL_QUESTIONS.filter((q) => isExamPrep(q.problem)));
+  const EXAM_PIDS = Object.keys(PROBLEMS).concat(Object.keys(GL.PROBLEMS).filter(isExamPrep));
+  const GLEAM_CHIP = 'gleam'; // the topic-based exam filter chip for Gleam questions (kept with the topic chips)
   const scopeNote = (map, id) => { const e = scopeEntry(map, id); return e && e.status === 'note' && e.note ? e.note : ''; };
   const scopeNoteHTML = (text) => (text ? `<div class="scope-note" role="note"><b>Scope note:</b> ${inline(text)}</div>` : '');
   const TOPICS_IN_SCOPE = TOPICS.map((t) => t.id).filter((id) => !OUT_TOPICS.has(id));
@@ -153,7 +160,7 @@
       { topics: TOPICS_IN_SCOPE, exams: Object.keys(EXAMS), glTopics: GL.TOPICS.map((t) => t.id), glSources: Object.keys(GL.SOURCES), difficulties: DIFFS }),
     session: migrateSession(saved && saved.session), // the practice set; carries its own notes/annotations (see below)
     examPrefs: cleanPrefs(Object.assign({}, DEFAULT_EXAM_PREFS, isObj(saved && saved.examPrefs) ? saved.examPrefs : {}), DEFAULT_EXAM_PREFS,
-      { topics: TOPICS_IN_SCOPE, picked: Object.keys(PROBLEMS) }),
+      { topics: TOPICS_IN_SCOPE.concat(GLEAM_CHIP), picked: EXAM_PIDS }),
     exam: migrateAttempt(saved && saved.exam),         // the exam in progress (never submitted), or null
     attempts: (Array.isArray(saved && saved.attempts) ? saved.attempts : []).map(migrateAttempt).filter(Boolean), // submitted exams, oldest first
     reviews: (saved && saved.reviews && typeof saved.reviews === 'object') ? saved.reviews : {}, // attemptId -> review workspace
@@ -219,7 +226,7 @@
   if (!['practice', 'exam'].includes(store.prefs.mode)) store.prefs.mode = 'practice';
   if (!['full', 'custom'].includes(store.examPrefs.kind)) store.examPrefs.kind = 'full';
   // A saved pick can be a question that is now wholly out of scope; drop it so it can't start an empty group.
-  store.examPrefs.picked = [...new Set(store.examPrefs.picked)].filter((pid) => PMAP[pid] && QUESTIONS.some((q) => q.problem === pid));
+  store.examPrefs.picked = [...new Set(store.examPrefs.picked)].filter((pid) => PMAP[pid] && EXAM_QUESTIONS.some((q) => q.problem === pid));
   // view: which session the question screen shows. 'practice' | 'exam' (in progress) | 'review' (a submitted attempt)
   const ui = { screen: 'landing', view: 'practice', attemptId: null, menu: null, navOpen: false, dirOpen: false, hideClock: false, confirmReveal: null, annMode: 'none', examQuery: '', sizeDraft: null, walkCollapsed: false };
 
@@ -2353,15 +2360,25 @@
   }
 
   // ───────────────────────────── Bank filtering & sessions ─────────────────────────────
-  // The Practice filters for the chosen language: its bank, topics (in this semester's scope) and sources, and
-  // the selections that apply to it.
+  // The Practice filters for the chosen language. Each language is a section with its own bank, topics (in this
+  // semester's scope), sources and selections; "All" uses both sections. Topic and source ids never repeat across
+  // languages (Gleam ones start with gl-), so the combined lists filter both banks at once, and no topic chosen in
+  // either section means every topic of both.
+  const LANG_SECTIONS = {
+    python: (p) => ({ id: 'python', name: 'Python', questions: QUESTIONS, topicList: TOPICS.filter((t) => !OUT_TOPICS.has(t.id)), topics: p.topics, topicsPref: 'topics',
+      sourceList: Object.values(EXAMS), sources: p.exams, sourcesPref: 'exams' }),
+    gleam: (p) => ({ id: 'gleam', name: 'Gleam', questions: GL_QUESTIONS, topicList: GL.TOPICS, topics: p.glTopics, topicsPref: 'glTopics',
+      sourceList: Object.values(GL.SOURCES), sources: p.glSources, sourcesPref: 'glSources' }),
+  };
   function langView(prefs) {
-    if (prefs.lang === 'gleam') {
-      return { lang: 'gleam', questions: GL_QUESTIONS, topicList: GL.TOPICS, topics: prefs.glTopics, topicsPref: 'glTopics',
-        sources: prefs.glSources, sourcesPref: 'glSources', sourceList: Object.values(GL.SOURCES), sourcesLabel: 'Sources', allSources: 'All sources' };
-    }
-    return { lang: 'python', questions: QUESTIONS, topicList: TOPICS.filter((t) => !OUT_TOPICS.has(t.id)), topics: prefs.topics, topicsPref: 'topics',
-      sources: prefs.exams, sourcesPref: 'exams', sourceList: Object.values(EXAMS), sourcesLabel: 'Exams', allSources: 'All midterms' };
+    const all = prefs.lang === 'all';
+    const sections = (all ? ['python', 'gleam'] : [prefs.lang === 'gleam' ? 'gleam' : 'python']).map((id) => LANG_SECTIONS[id](prefs));
+    const cat = (k) => sections.flatMap((s) => s[k]);
+    const one = sections[0].id;
+    return { lang: all ? 'all' : one, sections, questions: cat('questions'), topicList: cat('topicList'), topics: cat('topics'),
+      sourceList: cat('sourceList'), sources: cat('sources'),
+      sourcesLabel: all ? 'Exams & sources' : one === 'gleam' ? 'Sources' : 'Exams',
+      allSources: all ? 'All exams and sources' : one === 'gleam' ? 'All sources' : 'All midterms' };
   }
   function filtered(prefs, ignoreTopics) {
     const v = langView(prefs);
@@ -2412,7 +2429,8 @@
     const v = langView(p);
     const ids = v.questions.filter((q) => chosen.has(q.problem) && v.sources.includes(PMAP[q.problem].exam))
       .sort((a, b) => ORDER[a.id] - ORDER[b.id]).map((q) => q.id);
-    newSession(ids, v.lang === 'gleam' ? `Gleam · ${topicNames(v.topics)}` : topicNames(v.topics));
+    const prefix = { gleam: 'Gleam · ', all: 'All languages · ' }[v.lang] || '';
+    newSession(ids, prefix + topicNames(v.topics));
   }
   function finishSession() {
     const s = store.session;
@@ -2451,7 +2469,7 @@
 
   // ───────────────────────────── Exams ─────────────────────────────
   // A question group is one PROBLEMS entry; an exam always takes every part of each group it includes.
-  const partsOf = (pid) => QUESTIONS.filter((q) => q.problem === pid).sort((a, b) => ORDER[a.id] - ORDER[b.id]);
+  const partsOf = (pid) => EXAM_QUESTIONS.filter((q) => q.problem === pid).sort((a, b) => ORDER[a.id] - ORDER[b.id]);
   const examGroups = (examId) => Object.keys(PROBLEMS).filter((pid) => PMAP[pid].exam === examId && partsOf(pid).length);
   const shortExam = (examId) => SRC[examId].short || SRC[examId].label.replace('Midterm ', 'MT');
   // How a problem is referred to: "Q4" on an exam or worksheet, "Slide 8" for a lecture example.
@@ -2648,13 +2666,15 @@
 
     const v = langView(p);
     const topicName = (id) => topicById(id).name;
+    // With All, each menu lists both languages under their own heading (both have, e.g., a recursion topic).
+    const heading = (sec) => (v.sections.length > 1 ? `<div class="dd-group">${esc(sec.name)}</div>` : '');
     const topicsBody = `<div class="dd-tools"><button class="link" data-action="topics-all">Select all</button><button class="link" data-action="topics-none">Clear</button></div>
-      <div class="dd-list cols">${v.topicList.map((t) => {
+      ${v.sections.map((sec) => `${heading(sec)}<div class="dd-list cols">${sec.topicList.map((t) => {
         const count = problemsOf(base.filter((q) => q.topics.includes(t.id))).length;
-        return optRow('checkbox', v.topicsPref, t.id, t.name, v.topics.includes(t.id), count ? String(count) : 'soon', !count);
-      }).join('')}</div>
+        return optRow('checkbox', sec.topicsPref, t.id, t.name, sec.topics.includes(t.id), count ? String(count) : 'soon', !count);
+      }).join('')}</div>`).join('')}
       <p class="hint">Numbers are questions (each may have several parts). Leave everything unchecked to include all topics.</p>`;
-    const examsBody = `<div class="dd-list">${v.sourceList.map((e) => optRow('checkbox', v.sourcesPref, e.id, e.label, v.sources.includes(e.id))).join('')}</div>`;
+    const examsBody = v.sections.map((sec) => `${heading(sec)}<div class="dd-list">${sec.sourceList.map((e) => optRow('checkbox', sec.sourcesPref, e.id, e.label, sec.sources.includes(e.id))).join('')}</div>`).join('');
     // Language: each one has its own question bank, topics and sources. SQL is listed but not available yet.
     const langRow = `<div class="lang-row" role="radiogroup" aria-label="Language">
         <span class="lang-label" aria-hidden="true">Language</span>
@@ -2705,7 +2725,7 @@
   }
 
   // ───────────────────────────── Exam setup & history (home, Exam Mode) ─────────────────────────────
-  const topicLabel = (id) => TOPICS.find((t) => t.id === id).name;
+  const topicLabel = (id) => topicById(id).name;
   const when = (ts) => new Date(ts).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   const examMinutesOk = (p) => !p.timerOn || (Number.isInteger(p.minutes) && p.minutes >= 1 && p.minutes <= EXAM_MAX_MINUTES);
   // "Exclusive — Fall 2025 MT2 — Q4 — Linked Lists, Lists & Mutation" (names repeat across exams, so the exam is always shown)
@@ -2730,8 +2750,9 @@
   function pickCandidates() {
     const p = store.examPrefs;
     const q = ui.examQuery.trim().toLowerCase();
-    return Object.keys(PROBLEMS).filter((pid) => partsOf(pid).length &&
-      (!p.topics.length || groupTopics(pid).some((t) => p.topics.includes(t))) &&
+    // The Gleam chip matches every Gleam question (the exam-prep worksheets); other chips match Python topics.
+    return EXAM_PIDS.filter((pid) => partsOf(pid).length &&
+      (!p.topics.length || groupTopics(pid).some((t) => p.topics.includes(t)) || (isGleam(pid) && p.topics.includes(GLEAM_CHIP))) &&
       (!q || groupLine(pid).toLowerCase().includes(q)));
   }
   function pickListHTML() {
@@ -2777,8 +2798,9 @@
       }).join('')}</div>`;
     } else {
       const avail = TOPICS.filter((t) => Object.keys(PROBLEMS).some((pid) => groupTopics(pid).includes(t.id)));
+      if (EXAM_PIDS.some(isGleam)) avail.push({ id: GLEAM_CHIP, name: 'Gleam' }); // after the Python topics
       config = `<div class="chips" role="group" aria-label="Filter by topic">${avail.map((t) =>
-        `<button class="chip" id="xt-${t.id}" data-action="xtopic" data-id="${t.id}" aria-pressed="${p.topics.includes(t.id)}">${esc(t.name)}</button>`).join('')}        ${p.topics.length ? '<button class="link" data-action="xtopics-clear">Clear filters</button>' : ''}</div>
+        `<button class="chip${t.id === GLEAM_CHIP ? ' chip-lang' : ''}" id="xt-${t.id}" data-action="xtopic" data-id="${t.id}" aria-pressed="${p.topics.includes(t.id)}">${esc(t.name)}</button>`).join('')}        ${p.topics.length ? '<button class="link" data-action="xtopics-clear">Clear filters</button>' : ''}</div>
         <input type="search" id="exam-search" class="pick-search" placeholder="Search by name, exam, or question number" value="${esc(ui.examQuery)}" aria-label="Search questions" autocomplete="off">
         <div class="pick-cols">
           <div class="pick-list" id="pick-list" role="group" aria-label="Questions">${pickListHTML()}</div>
@@ -3548,7 +3570,7 @@
         if (!own) tally[t].broad = true;
       });
     });
-    const order = Object.fromEntries(TOPICS.map((t, i) => [t.id, i]));
+    const order = Object.fromEntries(ALL_TOPICS.map((t, i) => [t.id, i]));
     const topics = Object.values(tally).sort((x, y) => y.parts.length - x.parts.length || order[x.id] - order[y.id]);
     const unanswered = a.ids.filter((id) => statusIn(a, id) === 'skipped').length;
     return { missed, topics, unanswered, staff: a.ids.filter((id) => statusIn(a, id) === 'staff').length };
@@ -3557,7 +3579,7 @@
   // deterministic: more parts tagged with the topic first, then question-bank order. A group is never repeated.
   function recommend(topic, a, used, n) {
     const inAttempt = new Set(a.groups.map((g) => g.pid));
-    const rank = Object.keys(PROBLEMS)
+    const rank = EXAM_PIDS
       .map((pid, i) => ({ pid, i, hits: partsOf(pid).filter((q) => q.topics.includes(topic)).length }))
       .filter((r) => r.hits && !used.has(r.pid))
       .sort((x, y) => x.hits === y.hits ? x.i - y.i : y.hits - x.hits);
@@ -3602,7 +3624,7 @@
       const list = recommend(t.id, a, used, 3);
       const rows = list.map((r) => {
         const pr = PMAP[r.pid];
-        return `<li class="rec-row"><span class="rec-txt"><b>${esc(pr.title)}</b> <span class="hint">${esc(EXAMS[pr.exam].label)} · Q${esc(pr.number)} · ${partsOf(r.pid).length} part${partsOf(r.pid).length === 1 ? '' : 's'}${r.fromAttempt ? ' · also in this exam' : ''}</span></span>
+        return `<li class="rec-row"><span class="rec-txt"><b>${esc(pr.title)}</b> <span class="hint">${esc(SRC[pr.exam].label)} · Q${esc(pr.number)} · ${partsOf(r.pid).length} part${partsOf(r.pid).length === 1 ? '' : 's'}${r.fromAttempt ? ' · also in this exam' : ''}</span></span>
           <button class="btn btn-sm" data-action="practice-group" data-pid="${r.pid}" aria-label="Practice ${esc(pr.title)} (${esc(shortExam(pr.exam))} Q${esc(pr.number)}) in Practice Mode">Practice</button></li>`;
       }).join('');
       return `<div class="rec-topic"><h5>${topicName(t)}</h5>${rows ? `<ul class="rec-list">${rows}</ul>` : '<p class="hint">No other questions in the bank cover this topic yet.</p>'}</div>`;
@@ -3645,7 +3667,7 @@
       const summary = ['correct', 'incorrect', 'skipped', 'staff'].filter((k) => c[k]).map((k) => `${c[k]} ${STATUS_LABEL[k].toLowerCase()}`).join(' · ');
       const walk = full ? '' : walkLinkHTML(pr.exam); // topic-based: each group links its own exam's playlist
       return `<details class="rq-group${walk ? ' has-walk' : ''}"${c.incorrect ? ' open' : ''}>
-        <summary><span class="rq-n">${gi + 1}</span><span class="rq-title">${esc(pr.title)}<small>${esc(EXAMS[pr.exam].label)} · Q${esc(pr.number)} · ${g.ids.length} part${g.ids.length === 1 ? '' : 's'}</small></span><span class="rq-sum">${summary}</span>${walk ? `<span class="rq-walk">${walk}</span>` : ''}</summary>
+        <summary><span class="rq-n">${gi + 1}</span><span class="rq-title">${esc(pr.title)}<small>${esc(SRC[pr.exam].label)} · Q${esc(pr.number)} · ${g.ids.length} part${g.ids.length === 1 ? '' : 's'}</small></span><span class="rq-sum">${summary}</span>${walk ? `<span class="rq-walk">${walk}</span>` : ''}</summary>
         <ul class="part-rows">${rowsFor(g, gi)}</ul></details>`;
     }).join('');
     const excluded = [sc.staff ? `${sc.staff} part${sc.staff === 1 ? '' : 's'} graded by course staff` : '', sc.unknown ? `${sc.unknown} part${sc.unknown === 1 ? '' : 's'} without a published point value` : ''].filter(Boolean);
@@ -3807,8 +3829,8 @@
       case 'replay-tour': if (TOUR) TOUR.replay(); return;
       case 'landing': ui.screen = 'landing'; ui.menu = null; break;
       case 'menu': ui.menu = ui.menu === btn.dataset.id ? null : btn.dataset.id; break;
-      case 'topics-all': { const v = langView(p); p[v.topicsPref] = v.topicList.filter((t) => v.questions.some((x) => x.topics.includes(t.id))).map((t) => t.id); break; }
-      case 'topics-none': p[langView(p).topicsPref] = []; break;
+      case 'topics-all': langView(p).sections.forEach((sec) => { p[sec.topicsPref] = sec.topicList.filter((t) => sec.questions.some((x) => x.topics.includes(t.id))).map((t) => t.id); }); break;
+      case 'topics-none': langView(p).sections.forEach((sec) => { p[sec.topicsPref] = []; }); break;
       case 'lang': p.lang = btn.dataset.v; ui.sizeDraft = null; break;
       case 'size-step': {
         const typed = ui.sizeDraft != null ? parseSize(ui.sizeDraft) : null;
