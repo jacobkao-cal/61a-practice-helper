@@ -302,6 +302,15 @@
       : paras(part.replace(/^\n+|\n+$/g, '')))).filter((h) => h !== '<p></p>').join('');
   }
 
+  // A part's prompt: the text before any ``` fence goes in the question line; fenced code (kept as printed) and
+  // any text after it go below that line, so code a question asks about sits right beside its answer box.
+  function promptParts(prompt) {
+    const s = String(prompt || '');
+    const at = s.indexOf('```');
+    if (at < 0) return { head: inline(s), below: '' };
+    return { head: inline(s.slice(0, at).replace(/\s+$/, '')), below: `<div class="q-code">${rich(s.slice(at))}</div>` };
+  }
+
   // ───────────────────────────── Grading ─────────────────────────────
   // Only for comparing a typed answer with the accepted ones: whitespace and quote style don't count, including the
   // curly quotes ‘ ’ “ ” some keyboards substitute. The answer itself, and the code Run Code executes, are unchanged.
@@ -3296,8 +3305,8 @@
       staff: '<div class="verdict">Graded by Course Staff</div><p class="staff-note">This question requires manual grading and will not be graded on this platform.</p>',
     }[st];
     return `<div class="rv-part" id="rv-${q.id}">
-      <p class="q-head"><span class="lbl">${esc(q.label)}</span>${inline(q.prompt)}
-        <span class="part-meta">${pts} · <span class="badge ${badgeCls(st)}">${STATUS_LABEL[st]}</span></span></p>
+      <p class="q-head"><span class="lbl">${esc(q.label)}</span>${promptParts(q.prompt).head}
+        <span class="part-meta">${pts} · <span class="badge ${badgeCls(st)}">${STATUS_LABEL[st]}</span></span></p>${promptParts(q.prompt).below}
       <div class="rv-block"><div class="rv-k">Your submitted answer</div>${sub}</div>
       ${current}
       <div class="feedback ${{ correct: 'good', incorrect: 'bad', skipped: 'info', staff: 'info' }[st]}">${verdict}${officialAnswerHTML(q)}</div>
@@ -3341,8 +3350,8 @@
         : '<button class="btn" data-action="reveal">Show Solution</button>'}
     </div>`;
     return `<div class="part${ui.activeBlank && ui.activeBlank === q.blank ? ' active' : ''}" id="part-${id}" data-part="${id}" data-blank="${esc(q.blank || '')}">
-      <p class="q-head"><span class="lbl">${esc(q.label)}</span>${pts}${inline(q.prompt)}
-        <span class="part-meta">${exam && q.type === 'code' ? 'Code response' : TYPE_LABEL[q.type]} · <span class="diff-${q.difficulty}">${q.difficulty}</span></span></p>
+      <p class="q-head"><span class="lbl">${esc(q.label)}</span>${pts}${promptParts(q.prompt).head}
+        <span class="part-meta">${exam && q.type === 'code' ? 'Code response' : TYPE_LABEL[q.type]} · <span class="diff-${q.difficulty}">${q.difficulty}</span></span></p>${promptParts(q.prompt).below}
       ${scopeNoteHTML(scopeNote('questions', id))}
       ${response}
       ${actions}

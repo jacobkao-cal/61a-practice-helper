@@ -406,7 +406,6 @@ pub fn shrink(k: Int, t: List(Int)) -> fn(List(Int)) -> List(Int) {
   }
 }
 `),
-      outro: 'Then the following is evaluated:\n\n```\nlet run = shrink(3, [])\nrun([3, 1, 4, 1, 5, 9, 2, 6])\n```',
     },
 
     // ───────────────────────────── Lecture 28: Algebraic Data Types ─────────────────────────────
@@ -668,7 +667,7 @@ pub fn remove_leaf(tree: Tree(a)) -> Tree(a) {
     Q('gl-ep12-4e', 'gl-ep12-4', '(e)', 1, ['gl-dicts', 'gl-immutable'], 'hard', 'e', sa, 'Fill in blank (e).'),
     Q('gl-ep12-4f', 'gl-ep12-4', 'Q4.5', 1, ['gl-immutable', 'gl-dicts'], 'medium', null, sa, 'After `befriend(my_pen, "Clarice", "Alice")` in the asserts above, what does `dict.get(my_pen.animals, "Alice")` evaluate to?'),
 
-    Q('gl-ep12-5a', 'gl-ep12-5', '(a)', 1, ['gl-hof', 'gl-recursion'], 'hard', null, sa, 'What does the final expression, `run([3, 1, 4, 1, 5, 9, 2, 6])`, evaluate to? (The code it follows is under the function on the left.)'),
+    Q('gl-ep12-5a', 'gl-ep12-5', '(a)', 1, ['gl-hof', 'gl-recursion'], 'hard', null, sa, 'What does the final expression evaluate to?\n\n```\nlet run = shrink(3, [])\nrun([3, 1, 4, 1, 5, 9, 2, 6])\n```'),
 
     // Lecture 28
     Q('gl-lec28-8a', 'gl-lec28-8', '(a)', null, ['gl-lists'], 'medium', 'a', sa, 'Fill in blank (a): the pattern for lists that are alternating because they are too short to break the pattern.'),
