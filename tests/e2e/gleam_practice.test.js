@@ -288,6 +288,33 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   r = await run();
   ok(/Passed \d+\/6 tests/.test(r.tests) && r.tests !== 'Passed 6/6 tests!', `Run Code in review runs the submitted answers with Gleam (${r.tests})`);
 
+  // ── Tutorial: the Run Code tip is worded for the question's language ──
+  const runTip = async (pid) => {
+    const tp = await browser.newPage();
+    await tp.setViewport({ width: 1400, height: 900 });
+    const bank = pid.startsWith('gl-') ? G : P;
+    const ids = bank.QUESTIONS.filter((q) => q.problem === pid).map((q) => q.id);
+    const seen = Object.fromEntries(['modes', 'directions-practice', 'directions-exam', 'scope', 'annotate', 'notes', 'blanks', 'tutor', 'mark', 'dg-icons', 'dg-value', 'dg-list', 'dg-arrow', 'insights'].map((k) => [k, true]));
+    await tp.evaluateOnNewDocument((ids, seen) => {
+      if (sessionStorage.getItem('seeded')) return;
+      sessionStorage.setItem('seeded', '1');
+      localStorage.setItem('cs61a-practice:tour', JSON.stringify({ asked: true, on: true, seen }));
+      localStorage.setItem('cs61a-practice:v1', JSON.stringify({ version: 5, prefs: { mode: 'practice', timerOn: false }, session: { ids, index: 0, title: 't', answers: {}, timer: null, startedAt: Date.now(), finished: false } }));
+    }, ids, seen);
+    await tp.goto(APP_URL);
+    await tp.click('[data-action="enter"]');
+    await tp.waitForSelector('.resume [data-action="resume"]');
+    await tp.click('.resume [data-action="resume"]');
+    await tp.waitForFunction(() => { const t = document.querySelector('.tour'); return t && t.dataset.step === 'run'; }, { timeout: 15000 });
+    const body = await tp.$eval('.tour', (t) => t.textContent);
+    await tp.close();
+    return body;
+  };
+  const gleamTip = await runTip('gl-lec28-8');
+  ok(/with Gleam/.test(gleamTip) && /assert/.test(gleamTip) && !/Python|doctest/.test(gleamTip), 'on a Gleam question, the Run Code tip talks about Gleam and its asserts, not Python');
+  const pythonTip = await runTip('fa25-4');
+  ok(/with Python/.test(pythonTip) && /doctests/.test(pythonTip) && !/Gleam/.test(pythonTip), 'on a Python question, the Run Code tip is unchanged');
+
   ok(errors.length === 0, `no page errors${errors.length ? `: ${errors.slice(0, 3).join(' | ')}` : ''}`);
   await browser.close();
   console.log(fails ? `\n${fails} check(s) failed` : '\nAll checks passed');
