@@ -2800,7 +2800,7 @@
       const avail = TOPICS.filter((t) => Object.keys(PROBLEMS).some((pid) => groupTopics(pid).includes(t.id)));
       if (EXAM_PIDS.some(isGleam)) avail.push({ id: GLEAM_CHIP, name: 'Gleam' }); // after the Python topics
       config = `<div class="chips" role="group" aria-label="Filter by topic">${avail.map((t) =>
-        `<button class="chip${t.id === GLEAM_CHIP ? ' chip-lang' : ''}" id="xt-${t.id}" data-action="xtopic" data-id="${t.id}" aria-pressed="${p.topics.includes(t.id)}">${esc(t.name)}</button>`).join('')}        ${p.topics.length ? '<button class="link" data-action="xtopics-clear">Clear filters</button>' : ''}</div>
+        `<button class="chip" id="xt-${t.id}" data-action="xtopic" data-id="${t.id}" aria-pressed="${p.topics.includes(t.id)}">${esc(t.name)}</button>`).join('')}        ${p.topics.length ? '<button class="link" data-action="xtopics-clear">Clear filters</button>' : ''}</div>
         <input type="search" id="exam-search" class="pick-search" placeholder="Search by name, exam, or question number" value="${esc(ui.examQuery)}" aria-label="Search questions" autocomplete="off">
         <div class="pick-cols">
           <div class="pick-list" id="pick-list" role="group" aria-label="Questions">${pickListHTML()}</div>
