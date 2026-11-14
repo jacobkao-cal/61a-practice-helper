@@ -6,7 +6,7 @@ const { spawnSync } = require('child_process');
 
 let failed = 0;
 const suites = fs.readdirSync(path.join(__dirname, 'e2e')).filter((f) => f.endsWith('.test.js')).sort();
-for (const f of [...suites.map((s) => path.join('e2e', s)), 'study_guides_doctest.js', 'verify_test_bank.js', 'verify_import_2021_2022.js', 'verify_in_scope.js']) {
+for (const f of [...suites.map((s) => path.join('e2e', s)), 'study_guides_doctest.js', 'verify_test_bank.js', 'verify_import_2021_2022.js', 'verify_in_scope.js', 'verify_gleam_bank.js']) {
   const r = spawnSync(process.execPath, [path.join(__dirname, f)], { encoding: 'utf8' });
   const out = (r.stdout || '') + (r.stderr || '');
   const pass = (out.match(/^PASS/gm) || []).length;

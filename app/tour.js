@@ -46,7 +46,7 @@ window.CS61A_TOUR = (function () {
   // In order: when several are on screen at once, they are shown one after another.
   const STEPS = [
     { id: 'modes', find: one('.home .mode-switch'), title: 'Choose a mode',
-      html: '<p><b>Practice Mode</b> lets you check answers and see solutions as you go. <b>Exam Mode</b> is a timed past exam with no feedback until you submit.</p><p>Pick one, set it up below, and start.</p>' },
+      html: '<p><b>Practice Mode</b> lets you check answers and see solutions as you go. <b>Exam Mode</b> is a timed exam with no feedback until you submit: a full past midterm, or questions you pick by topic (including <b>Gleam</b>).</p><p>In Practice Mode, choose a <b>Language</b> first (Python, Gleam, or All). Then set it up below, and start.</p>' },
     directions('practice'),
     directions('exam'),
     // The first scope note on screen (data/in_scope.js), in the left pane or beside a part.
@@ -58,8 +58,16 @@ window.CS61A_TOUR = (function () {
       html: '<p>Click the note tool and a note appears in the middle of the page, ready to type. Its own toolbar can highlight, draw, erase and add a <b>tree</b> (<b>+</b> adds a branch, <b>×</b> removes one).</p><p>Drag the top bar to move a note (even to the right side), the corner to resize it, and <b>–</b> to tuck it into the bar at the bottom. Click its numbered icon there to bring it back.</p>' },
     { id: 'blanks', find: blankPair, title: 'Your answers fill the code',
       html: '<p>What you choose or type for a part on the right appears in its blank in the code on the left, so you can read your whole solution in place.</p><p>Click a blank in the code to jump to its part.</p>' },
+    // Worded for the language of the question on screen (app.js marks the Run Code slot with data-lang).
     { id: 'run', find: one('#run-btn'), title: 'Run Code',
-      html: '<p><b>Run Code</b> runs the code in the editor with Python, right in your browser. When the question has verified tests, it also runs its doctests and shows how many pass, so you can see if your code is right.</p><p>It isn’t available during an exam, only in Practice Mode and when you review an exam.</p>' },
+      html: () => {
+        const slot = document.querySelector('.run-slot[data-lang]');
+        const gleam = slot && slot.dataset.lang === 'gleam';
+        return (gleam
+          ? '<p><b>Run Code</b> compiles and runs the code in the editor with Gleam, right in your browser, and shows any compile error. It also runs the question’s tests (its own <code>assert</code>s plus a few added cases) and shows how many pass, so you can see if your code is right.</p>'
+          : '<p><b>Run Code</b> runs the code in the editor with Python, right in your browser. When the question has verified tests, it also runs its doctests and shows how many pass, so you can see if your code is right.</p>')
+          + '<p>It isn’t available during an exam, only in Practice Mode and when you review an exam.</p>';
+      } },
     // Shows only once the Python Tutor button is on the page (it ships separately from the tour).
     { id: 'tutor', find: one('#tutor-btn'), title: 'Python Tutor',
       html: '<p><b>Python Tutor</b> opens this code in a new tab and steps through it line by line, drawing the environment diagram as it runs.</p><p>If the code has blanks, it unlocks once every blank is filled. Your answers don’t have to be right.</p>' },

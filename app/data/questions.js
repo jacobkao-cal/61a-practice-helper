@@ -32,7 +32,6 @@ window.CS61A_BANK = (function () {
     { id: 'generators', name: 'Generators', blurb: 'yield, yield from' },
     { id: 'oop', name: 'OOP', blurb: 'Classes, inheritance, attributes' },
     { id: 'efficiency', name: 'Efficiency', blurb: 'Order of growth' },
-    { id: 'scheme', name: 'Scheme', blurb: 'Coming soon' },
   ];
 
   // complete: every question of the original PDF is transcribed (checked against the PDFs' point values:

@@ -7,8 +7,25 @@
 (function () {
   'use strict';
 
-  const { TOPICS, EXAMS, PROBLEMS, ANSWER_KEY, BUBBLE_NOTE } = window.CS61A_BANK;
+  // Python bank. TOPICS, EXAMS, PROBLEMS and QUESTIONS below are Python only: Exam Mode lists and builds exams from
+  // them, so it never sees a Gleam question.
+  const { TOPICS, EXAMS, PROBLEMS, BUBBLE_NOTE } = window.CS61A_BANK;
   const ALL_QUESTIONS = window.CS61A_BANK.QUESTIONS;
+  // Gleam bank (data/gleam_questions.js), Practice Mode only. Its entries are merged into the id lookups below
+  // (PMAP, SRC, QMAP, ANSWER_KEY, topic names), which work the same for both languages.
+  const GL = Object.assign({ TOPICS: [], SOURCES: {}, PROBLEMS: {}, QUESTIONS: [], ANSWER_KEY: {}, TESTS: {}, FILES: {}, RUN_LIMITS: {} }, window.CS61A_GLEAM_BANK || {});
+  const PMAP = Object.assign({}, PROBLEMS, GL.PROBLEMS);    // problem id -> problem (either language)
+  const SRC = Object.assign({}, EXAMS, GL.SOURCES);         // problem.exam -> its exam or Gleam source
+  const ANSWER_KEY = Object.assign({}, window.CS61A_BANK.ANSWER_KEY, GL.ANSWER_KEY);
+  const ALL_TOPICS = TOPICS.concat(GL.TOPICS);
+  const topicById = (id) => ALL_TOPICS.find((t) => t.id === id);
+  const isGleam = (pid) => Object.prototype.hasOwnProperty.call(GL.PROBLEMS, pid);
+  const LANGS = [
+    { id: 'all', name: 'All' }, // every question of every available language
+    { id: 'python', name: 'Python' },
+    { id: 'gleam', name: 'Gleam' },
+    { id: 'sql', name: 'SQL', soon: true },
+  ];
   // Scope for this semester (data/in_scope.js). Out-of-scope parts stay in the bank, so saved sessions and past
   // attempts that include them still load (QMAP and ORDER cover every part); they are only left out of new
   // practice sets and exams, which are all built from QUESTIONS.
@@ -21,13 +38,21 @@
     return !(q.topics.length && q.topics.every((t) => OUT_TOPICS.has(t)));
   }
   const QUESTIONS = ALL_QUESTIONS.filter(inScope);
+  const GL_QUESTIONS = GL.QUESTIONS.filter(inScope);
+  const EVERY_QUESTION = ALL_QUESTIONS.concat(GL.QUESTIONS); // id lookups and blank links, both languages
+  // Exam Mode: the Python bank, plus the Gleam exam-prep worksheets in topic-based exams only (the "Gleam" chip).
+  // Full past exams stay Python midterms. Gleam lecture examples are Practice Mode only.
+  const isExamPrep = (pid) => isGleam(pid) && GL.SOURCES[GL.PROBLEMS[pid].exam].kind === 'exam-prep';
+  const EXAM_QUESTIONS = QUESTIONS.concat(GL_QUESTIONS.filter((q) => isExamPrep(q.problem)));
+  const EXAM_PIDS = Object.keys(PROBLEMS).concat(Object.keys(GL.PROBLEMS).filter(isExamPrep));
+  const GLEAM_CHIP = 'gleam'; // the topic-based exam filter chip for Gleam questions (kept with the topic chips)
   const scopeNote = (map, id) => { const e = scopeEntry(map, id); return e && e.status === 'note' && e.note ? e.note : ''; };
   const scopeNoteHTML = (text) => (text ? `<div class="scope-note" role="note"><b>Scope note:</b> ${inline(text)}</div>` : '');
   const TOPICS_IN_SCOPE = TOPICS.map((t) => t.id).filter((id) => !OUT_TOPICS.has(id));
   const GUIDES = window.CS61A_GUIDES || {}; // topic id -> study-guide concepts (data/study_guides.js)
   const TOUR = window.CS61A_TOUR || null;   // first-visit tour and one-time tips (tour.js)
-  const QMAP = Object.fromEntries(ALL_QUESTIONS.map((q) => [q.id, q]));
-  const ORDER = Object.fromEntries(ALL_QUESTIONS.map((q, i) => [q.id, i]));
+  const QMAP = Object.fromEntries(EVERY_QUESTION.map((q) => [q.id, q]));
+  const ORDER = Object.fromEntries(EVERY_QUESTION.map((q, i) => [q.id, i]));
   const STORE_KEY = 'cs61a-practice:v1';
   const DIFFS = ['easy', 'medium', 'hard'];
   const TYPE_LABEL = { single_choice: 'Multiple choice', multi_select: 'Select all that apply', short_answer: 'Short answer', code: 'Code response · self-check' };
@@ -36,7 +61,9 @@
   const live = document.getElementById('sr-live');
 
   // ───────────────────────────── State & persistence ─────────────────────────────
-  const DEFAULT_PREFS = { mode: 'practice', topics: [], exams: Object.keys(EXAMS), difficulties: DIFFS.slice(), size: 5, timerOn: true, minutes: 25 };
+  // Practice Mode filters. lang picks the bank; topics/exams filter Python, glTopics/glSources filter Gleam (each
+  // language keeps its own selection when you switch).
+  const DEFAULT_PREFS = { mode: 'practice', lang: 'python', topics: [], exams: Object.keys(EXAMS), glTopics: [], glSources: Object.keys(GL.SOURCES), difficulties: DIFFS.slice(), size: 5, timerOn: true, minutes: 25 };
   // Neither exam PDF states a time limit, so exams start from this editable default (labeled as such in the UI).
   const EXAM_DEFAULT_MINUTES = 120;
   const EXAM_MAX_MINUTES = 300;
@@ -78,7 +105,7 @@
   // timer) instead of crashing; a record with no usable question ids is dropped.
   function migrateSession(s) {
     if (!isObj(s) || !Array.isArray(s.ids) || !s.ids.length || !s.ids.every((id) => QMAP[id])) return null;
-    const groupsOk = Array.isArray(s.groups) && s.groups.length && s.groups.every((g) => isObj(g) && PROBLEMS[g.pid] &&
+    const groupsOk = Array.isArray(s.groups) && s.groups.length && s.groups.every((g) => isObj(g) && PMAP[g.pid] &&
       Array.isArray(g.ids) && g.ids.length && g.ids.every((id) => QMAP[id] && QMAP[id].problem === g.pid)) &&
       s.groups.reduce((t, g) => t + g.ids.length, 0) === s.ids.length;
     if (!groupsOk) {
@@ -110,7 +137,7 @@
   // Older notes used ___(a)___ placeholders; the editor now keeps the template token ⟦a⟧.
   function migrateNotes(notes) {
     Object.keys(notes).forEach((pid) => {
-      if (!PROBLEMS[pid]) delete notes[pid];
+      if (!PMAP[pid]) delete notes[pid];
       else notes[pid] = notes[pid].replace(/___\(([^)]+)\)___/g, '⟦$1⟧');
     });
     return notes;
@@ -130,10 +157,10 @@
   const store = {
     version: STORE_VERSION, // same storage key as v1, so practice sessions saved before exams existed still load
     prefs: cleanPrefs(Object.assign({}, DEFAULT_PREFS, isObj(saved && saved.prefs) ? saved.prefs : {}), DEFAULT_PREFS,
-      { topics: TOPICS_IN_SCOPE, exams: Object.keys(EXAMS), difficulties: DIFFS }),
+      { topics: TOPICS_IN_SCOPE, exams: Object.keys(EXAMS), glTopics: GL.TOPICS.map((t) => t.id), glSources: Object.keys(GL.SOURCES), difficulties: DIFFS }),
     session: migrateSession(saved && saved.session), // the practice set; carries its own notes/annotations (see below)
     examPrefs: cleanPrefs(Object.assign({}, DEFAULT_EXAM_PREFS, isObj(saved && saved.examPrefs) ? saved.examPrefs : {}), DEFAULT_EXAM_PREFS,
-      { topics: TOPICS_IN_SCOPE, picked: Object.keys(PROBLEMS) }),
+      { topics: TOPICS_IN_SCOPE.concat(GLEAM_CHIP), picked: EXAM_PIDS }),
     exam: migrateAttempt(saved && saved.exam),         // the exam in progress (never submitted), or null
     attempts: (Array.isArray(saved && saved.attempts) ? saved.attempts : []).map(migrateAttempt).filter(Boolean), // submitted exams, oldest first
     reviews: (saved && saved.reviews && typeof saved.reviews === 'object') ? saved.reviews : {}, // attemptId -> review workspace
@@ -163,6 +190,13 @@
     store.prefs.exams = Object.keys(EXAMS).filter((id) => store.prefs.exams.includes(id) || !knownExams.includes(id));
   }
   store.prefs.examsKnown = Object.keys(EXAMS);
+  // The same for Gleam sources (lectures and worksheets are added during the semester).
+  const knownSources = Array.isArray(saved && saved.prefs && saved.prefs.glSourcesKnown) ? saved.prefs.glSourcesKnown : null;
+  if (knownSources && knownSources.every((id) => !GL.SOURCES[id] || store.prefs.glSources.includes(id))) {
+    store.prefs.glSources = Object.keys(GL.SOURCES).filter((id) => store.prefs.glSources.includes(id) || !knownSources.includes(id));
+  }
+  store.prefs.glSourcesKnown = Object.keys(GL.SOURCES);
+  if (!LANGS.some((l) => l.id === store.prefs.lang && !l.soon)) store.prefs.lang = 'python';
   // Before v5, bold around code (e.g. **Do not mutate `s`.**) showed its ** as text. Those characters are gone now, so
   // a highlight saved before v5 in such prose is moved to the same words: each offset in the old text maps to the
   // matching position in the new text (the new text is the old one with only those characters removed).
@@ -192,7 +226,7 @@
   if (!['practice', 'exam'].includes(store.prefs.mode)) store.prefs.mode = 'practice';
   if (!['full', 'custom'].includes(store.examPrefs.kind)) store.examPrefs.kind = 'full';
   // A saved pick can be a question that is now wholly out of scope; drop it so it can't start an empty group.
-  store.examPrefs.picked = [...new Set(store.examPrefs.picked)].filter((pid) => PROBLEMS[pid] && QUESTIONS.some((q) => q.problem === pid));
+  store.examPrefs.picked = [...new Set(store.examPrefs.picked)].filter((pid) => PMAP[pid] && EXAM_QUESTIONS.some((q) => q.problem === pid));
   // view: which session the question screen shows. 'practice' | 'exam' (in progress) | 'review' (a submitted attempt)
   const ui = { screen: 'landing', view: 'practice', attemptId: null, menu: null, navOpen: false, dirOpen: false, hideClock: false, confirmReveal: null, annMode: 'none', examQuery: '', sizeDraft: null, walkCollapsed: false };
 
@@ -266,6 +300,15 @@
     return s.split(/```\n?([\s\S]*?)\n?```/).map((part, i) => (i % 2
       ? `<pre class="rich-pre"><code>${esc(part)}</code></pre>`
       : paras(part.replace(/^\n+|\n+$/g, '')))).filter((h) => h !== '<p></p>').join('');
+  }
+
+  // A part's prompt: the text before any ``` fence goes in the question line; fenced code (kept as printed) and
+  // any text after it go below that line, so code a question asks about sits right beside its answer box.
+  function promptParts(prompt) {
+    const s = String(prompt || '');
+    const at = s.indexOf('```');
+    if (at < 0) return { head: inline(s), below: '' };
+    return { head: inline(s.slice(0, at).replace(/\s+$/, '')), below: `<div class="q-code">${rich(s.slice(at))}</div>` };
   }
 
   // ───────────────────────────── Grading ─────────────────────────────
@@ -363,15 +406,19 @@
   const editors = {}; // problemId -> { pid, wrap, cm, blanks, hl, current } — kept alive across re-renders
 
   function fileName(pid) {
-    const m = PROBLEMS[pid].code.match(/^(?:def|class)\s+(\w+)/m);
-    return m ? `${m[1]}.py` : `problem_${PROBLEMS[pid].number.replace(/\W+/g, '')}.py`;
+    if (isGleam(pid)) {
+      const g = PMAP[pid].code.match(/^(?:pub\s+)?fn\s+(\w+)/m);
+      return `${g ? g[1] : 'your_code'}.gleam`;
+    }
+    const m = PMAP[pid].code.match(/^(?:def|class)\s+(\w+)/m);
+    return m ? `${m[1]}.py` : `problem_${PMAP[pid].number.replace(/\W+/g, '')}.py`;
   }
   // The code a problem's editor starts from (and resets to): the exam template, or in a review workspace
   // the scratch code as it was when the attempt was submitted.
   function notesBase(pid) {
     const s = cur();
     const a = isReview(s) && attemptById(s.reviewOf);
-    return a && a.notes[pid] !== undefined ? a.notes[pid] : PROBLEMS[pid].code;
+    return a && a.notes[pid] !== undefined ? a.notes[pid] : PMAP[pid].code;
   }
   function editedNotes(pid) {
     const notes = notesOf();
@@ -380,7 +427,7 @@
   function partForBlank(pid, name) {
     const s = cur();
     const ids = s ? s.ids : [];
-    return ALL_QUESTIONS.find((q) => q.problem === pid && q.blank === name && ids.includes(q.id)) || null;
+    return EVERY_QUESTION.find((q) => q.problem === pid && q.blank === name && ids.includes(q.id)) || null;
   }
   // What a blank should display: { text, kind: 'mc' | 'typed' } or null when unanswered.
   function blankFill(pid, name) {
@@ -481,12 +528,15 @@
       wrap.appendChild(ta);
       return { pid, wrap, cm: null, blanks: [], hl: {}, current: null };
     }
+    // Gleam code uses the Gleam mode (gleam_mode.js) and 2-space indents, as Gleam's formatter does.
+    const gleam = isGleam(pid);
+    const unit = gleam ? 2 : 4;
     const cm = window.CodeMirror(wrap, {
-      value, mode: 'python', theme: 'monokai', lineNumbers: true, indentUnit: 4, tabSize: 4,
+      value, mode: gleam ? 'gleam' : 'python', theme: 'monokai', lineNumbers: true, indentUnit: unit, tabSize: unit,
       indentWithTabs: false, matchBrackets: true, autoCloseBrackets: true, viewportMargin: Infinity,
       screenReaderLabel: 'Scratch code editor',
       extraKeys: {
-        Tab: (c) => (c.somethingSelected() ? c.indentSelection('add') : c.replaceSelection('    ')),
+        Tab: (c) => (c.somethingSelected() ? c.indentSelection('add') : c.replaceSelection(' '.repeat(unit))),
         'Shift-Tab': (c) => c.indentSelection('subtract'),
         'Cmd-/': 'toggleComment', 'Ctrl-/': 'toggleComment',
         Esc: (c) => c.getInputField().blur(),
@@ -577,7 +627,7 @@
   function renderProse(pid, where) {
     const root = document.querySelector(`#problem-article [data-annot="${where}"]`);
     if (!root || leftPid !== pid) return;
-    root.innerHTML = rich(PROBLEMS[pid][where]);
+    root.innerHTML = rich(PMAP[pid][where]);
     anns(pid).filter((a) => a.kind === 'hl' && a.where === where).forEach((a) => wrapRange(root, a.start, a.end, a.id));
   }
   function wrapRange(root, start, end, aid) {
@@ -2203,7 +2253,7 @@
   // Built only when the problem changes (see buildLeft); it sits outside what ordinary re-renders replace.
   function buildDiagram(g) {
     const slot = document.getElementById('diagram-slot');
-    const fig = PROBLEMS[g.pid].figure;
+    const fig = PMAP[g.pid].figure;
     dgBlur();
     Object.assign(dg, { pid: null, list: null, canvas: null, selected: null, drag: null, editBefore: null });
     slot.innerHTML = fig ? renderDiagram(fig) : '';
@@ -2319,16 +2369,37 @@
   }
 
   // ───────────────────────────── Bank filtering & sessions ─────────────────────────────
+  // The Practice filters for the chosen language. Each language is a section with its own bank, topics (in this
+  // semester's scope), sources and selections; "All" uses both sections. Topic and source ids never repeat across
+  // languages (Gleam ones start with gl-), so the combined lists filter both banks at once, and no topic chosen in
+  // either section means every topic of both.
+  const LANG_SECTIONS = {
+    python: (p) => ({ id: 'python', name: 'Python', questions: QUESTIONS, topicList: TOPICS.filter((t) => !OUT_TOPICS.has(t.id)), topics: p.topics, topicsPref: 'topics',
+      sourceList: Object.values(EXAMS), sources: p.exams, sourcesPref: 'exams' }),
+    gleam: (p) => ({ id: 'gleam', name: 'Gleam', questions: GL_QUESTIONS, topicList: GL.TOPICS, topics: p.glTopics, topicsPref: 'glTopics',
+      sourceList: Object.values(GL.SOURCES), sources: p.glSources, sourcesPref: 'glSources' }),
+  };
+  function langView(prefs) {
+    const all = prefs.lang === 'all';
+    const sections = (all ? ['python', 'gleam'] : [prefs.lang === 'gleam' ? 'gleam' : 'python']).map((id) => LANG_SECTIONS[id](prefs));
+    const cat = (k) => sections.flatMap((s) => s[k]);
+    const one = sections[0].id;
+    return { lang: all ? 'all' : one, sections, questions: cat('questions'), topicList: cat('topicList'), topics: cat('topics'),
+      sourceList: cat('sourceList'), sources: cat('sources'),
+      sourcesLabel: all ? 'Exams & sources' : one === 'gleam' ? 'Sources' : 'Exams',
+      allSources: all ? 'All exams and sources' : one === 'gleam' ? 'All sources' : 'All midterms' };
+  }
   function filtered(prefs, ignoreTopics) {
-    return QUESTIONS.filter((q) =>
-      prefs.exams.includes(PROBLEMS[q.problem].exam) &&
+    const v = langView(prefs);
+    return v.questions.filter((q) =>
+      v.sources.includes(PMAP[q.problem].exam) &&
       prefs.difficulties.includes(q.difficulty) &&
-      (ignoreTopics || prefs.topics.length === 0 || q.topics.some((t) => prefs.topics.includes(t))));
+      (ignoreTopics || v.topics.length === 0 || q.topics.some((t) => v.topics.includes(t))));
   }
   const problemsOf = (qs) => [...new Set(qs.map((q) => q.problem))];
   function topicNames(ids) {
     if (!ids.length) return 'All topics';
-    return ids.map((id) => TOPICS.find((t) => t.id === id).name).join(', ');
+    return ids.map((id) => topicById(id).name).join(', ');
   }
   function newSession(ids, title) {
     const p = store.prefs;
@@ -2364,9 +2435,11 @@
     const pids = problemsOf(filtered(p));
     const n = setSize();
     const chosen = new Set(pids.slice().sort(() => Math.random() - 0.5).slice(0, n));
-    const ids = QUESTIONS.filter((q) => chosen.has(q.problem) && p.exams.includes(PROBLEMS[q.problem].exam))
+    const v = langView(p);
+    const ids = v.questions.filter((q) => chosen.has(q.problem) && v.sources.includes(PMAP[q.problem].exam))
       .sort((a, b) => ORDER[a.id] - ORDER[b.id]).map((q) => q.id);
-    newSession(ids, topicNames(p.topics));
+    const prefix = { gleam: 'Gleam · ', all: 'All languages · ' }[v.lang] || '';
+    newSession(ids, prefix + topicNames(v.topics));
   }
   function finishSession() {
     const s = store.session;
@@ -2405,21 +2478,23 @@
 
   // ───────────────────────────── Exams ─────────────────────────────
   // A question group is one PROBLEMS entry; an exam always takes every part of each group it includes.
-  const partsOf = (pid) => QUESTIONS.filter((q) => q.problem === pid).sort((a, b) => ORDER[a.id] - ORDER[b.id]);
-  const examGroups = (examId) => Object.keys(PROBLEMS).filter((pid) => PROBLEMS[pid].exam === examId && partsOf(pid).length);
-  const shortExam = (examId) => EXAMS[examId].label.replace('Midterm ', 'MT');
+  const partsOf = (pid) => EXAM_QUESTIONS.filter((q) => q.problem === pid).sort((a, b) => ORDER[a.id] - ORDER[b.id]);
+  const examGroups = (examId) => Object.keys(PROBLEMS).filter((pid) => PMAP[pid].exam === examId && partsOf(pid).length);
+  const shortExam = (examId) => SRC[examId].short || SRC[examId].label.replace('Midterm ', 'MT');
+  // How a problem is referred to: "Q4" on an exam or worksheet, "Slide 8" for a lecture example.
+  const qRef = (pr) => (SRC[pr.exam].kind === 'lecture' ? `Slide ${pr.number}` : `Q${pr.number}`);
   const groupTopics = (pid) => [...new Set(partsOf(pid).flatMap((q) => q.topics))];
   // A problem's printed points, unless some of its parts were left out for being out of scope: then the total of the
   // parts shown (`ids`). Older sessions that still include those parts keep the printed total.
   function headerPoints(pid, ids) {
-    const left = ALL_QUESTIONS.some((q) => q.problem === pid && !inScope(q) && !ids.includes(q.id));
+    const left = EVERY_QUESTION.some((q) => q.problem === pid && !inScope(q) && !ids.includes(q.id));
     const shown = ids.map((id) => QMAP[id]);
-    return left && shown.every(hasPoints) ? shown.reduce((t, q) => t + q.points, 0) : PROBLEMS[pid].points;
+    return left && shown.every(hasPoints) ? shown.reduce((t, q) => t + q.points, 0) : PMAP[pid].points;
   }
   // Sum of the parts' points when all are published; otherwise the problem's printed total.
   function groupPoints(pid) {
     const parts = partsOf(pid);
-    return parts.every(hasPoints) ? parts.reduce((t, q) => t + q.points, 0) : PROBLEMS[pid].points;
+    return parts.every(hasPoints) ? parts.reduce((t, q) => t + q.points, 0) : PMAP[pid].points;
   }
   const kindLabel = (a) => (a.kind === 'full' ? 'Full past exam' : 'Topic-based exam');
 
@@ -2541,7 +2616,8 @@
   function practiceSummaryHTML() {
     const p = store.prefs;
     const max = sizeMax();
-    return `<b>${max}</b> matching question${max === 1 ? '' : 's'} · this set has <b>${setSize()}</b>${p.topics.length > 2 ? ` · ${esc(topicNames(p.topics))}` : ''}`;
+    const v = langView(p);
+    return `<b>${max}</b> matching question${max === 1 ? '' : 's'} · this set has <b>${setSize()}</b>${v.topics.length > 2 ? ` · ${esc(topicNames(v.topics))}` : ''}`;
   }
   // Set size: a number box styled like the dropdowns, typed into directly or stepped with the arrows on its right.
   // What is typed stays as typed (ui.sizeDraft) until it is a valid size; it is normalized on blur and before starting.
@@ -2597,14 +2673,24 @@
       <div class="resume"><div><strong>Last set: ${esc(s.title)}</strong><span class="hint">Finished, ${s.groups.length} questions</span></div>
         <div class="actions"><button class="btn" data-action="show-results">View results</button></div></div>` : '');
 
-    const topicName = (id) => TOPICS.find((t) => t.id === id).name;
+    const v = langView(p);
+    const topicName = (id) => topicById(id).name;
+    // With All, each menu lists both languages under their own heading (both have, e.g., a recursion topic).
+    const heading = (sec) => (v.sections.length > 1 ? `<div class="dd-group">${esc(sec.name)}</div>` : '');
     const topicsBody = `<div class="dd-tools"><button class="link" data-action="topics-all">Select all</button><button class="link" data-action="topics-none">Clear</button></div>
-      <div class="dd-list cols">${TOPICS.filter((t) => !OUT_TOPICS.has(t.id)).map((t) => {
+      ${v.sections.map((sec) => `${heading(sec)}<div class="dd-list cols">${sec.topicList.map((t) => {
         const count = problemsOf(base.filter((q) => q.topics.includes(t.id))).length;
-        return optRow('checkbox', 'topics', t.id, t.name, p.topics.includes(t.id), count ? String(count) : 'soon', !count);
-      }).join('')}</div>
+        return optRow('checkbox', sec.topicsPref, t.id, t.name, sec.topics.includes(t.id), count ? String(count) : 'soon', !count);
+      }).join('')}</div>`).join('')}
       <p class="hint">Numbers are questions (each may have several parts). Leave everything unchecked to include all topics.</p>`;
-    const examsBody = `<div class="dd-list">${Object.values(EXAMS).map((e) => optRow('checkbox', 'exams', e.id, e.label, p.exams.includes(e.id))).join('')}</div>`;
+    const examsBody = v.sections.map((sec) => `${heading(sec)}<div class="dd-list">${sec.sourceList.map((e) => optRow('checkbox', sec.sourcesPref, e.id, e.label, sec.sources.includes(e.id))).join('')}</div>`).join('');
+    // Language: each one has its own question bank, topics and sources. SQL is listed but not available yet.
+    const langRow = `<div class="lang-row" role="radiogroup" aria-label="Language">
+        <span class="lang-label" aria-hidden="true">Language</span>
+        ${LANGS.map((l) => (l.soon
+          ? `<button class="lang-opt soon" role="radio" aria-checked="false" aria-disabled="true" disabled title="${esc(l.name)} questions are coming soon">${esc(l.name)}<small>Coming soon</small></button>`
+          : `<button class="lang-opt" id="lang-${l.id}" role="radio" data-action="lang" data-v="${l.id}" aria-checked="${v.lang === l.id}">${esc(l.name)}</button>`)).join('')}
+      </div>`;
     const diffBody = `<div class="dd-list">${DIFFS.map((d) => optRow('checkbox', 'difficulties', d, d[0].toUpperCase() + d.slice(1), p.difficulties.includes(d))).join('')}</div>`;
     const timerBody = `<div class="timer-config">
         <label><input type="checkbox" id="timer-on" ${p.timerOn ? 'checked' : ''}> Countdown timer</label>
@@ -2626,9 +2712,10 @@
       </div>
 
       ${mode === 'exam' ? renderExamSetup() + renderHistory() : `<section class="setup-card" aria-label="Practice setup">
+        ${langRow}
         <div class="dd-row">
-          ${dropdown('topics', 'Topics', p.topics.length ? summarize(p.topics, TOPICS.map((t) => t.id), topicName, 'All topics') : 'All topics', topicsBody, true)}
-          ${dropdown('exams', 'Exams', summarize(p.exams, Object.keys(EXAMS), (id) => EXAMS[id].label, 'All midterms'), examsBody)}
+          ${dropdown('topics', 'Topics', v.topics.length ? summarize(v.topics, v.topicList.map((t) => t.id), topicName, 'All topics') : 'All topics', topicsBody, true)}
+          ${dropdown('exams', v.sourcesLabel, summarize(v.sources, v.sourceList.map((e) => e.id), (id) => SRC[id].label, v.allSources), examsBody)}
           ${dropdown('difficulties', 'Difficulty', summarize(p.difficulties, DIFFS, cap, 'Any'), diffBody)}
           ${setSizeBox()}
           ${dropdown('timer', 'Timer', p.timerOn ? (minutesOk ? `${p.minutes} min` : 'Invalid') : 'Off', timerBody)}
@@ -2642,17 +2729,17 @@
       <div class="feedback-row"><a class="btn btn-sm btn-home btn-feedback" href="${FEEDBACK_URL}" target="_blank" rel="noopener noreferrer">${icon('msg')}Give Feedback</a><span class="feedback-note">Your feedback can make this platform better!</span></div>
       <div class="notice">No account needed. Your answers, code notes and annotations are saved in <b>this browser on this device</b> and are gone if you clear site data.</div>
       <p class="disclaimer">Privacy: this site uses Cloudflare Web Analytics, which collects aggregate traffic statistics (such as visits and page views) without cookies. Your answers, code, grades and exam history stay in your browser’s localStorage and are never sent anywhere, unless you choose Python Tutor on a question, which opens pythontutor.com with that question’s code.</p>
-      <p class="disclaimer">Independent student project, not an official UC Berkeley / CS 61A service. Questions and answers are transcribed from CS 61A Midterm 2 (Fall 2025, Spring 2025, Fall 2024, Spring 2024, Fall 2023, Spring 2023, Fall 2022 and Fall 2021) and credited on each question. Explanations were written for this prototype and are not official.</p>
+      <p class="disclaimer">Independent student project, not an official UC Berkeley / CS 61A service. Questions and answers are transcribed from CS 61A Midterm 2 (Fall 2025, Spring 2025, Fall 2024, Spring 2024, Fall 2023, Spring 2023, Fall 2022 and Fall 2021) and, for Gleam, from this semester’s exam-prep worksheets and lecture examples, and credited on each question. Explanations were written for this prototype and are not official.</p>
     </main>`;
   }
 
   // ───────────────────────────── Exam setup & history (home, Exam Mode) ─────────────────────────────
-  const topicLabel = (id) => TOPICS.find((t) => t.id === id).name;
+  const topicLabel = (id) => topicById(id).name;
   const when = (ts) => new Date(ts).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   const examMinutesOk = (p) => !p.timerOn || (Number.isInteger(p.minutes) && p.minutes >= 1 && p.minutes <= EXAM_MAX_MINUTES);
   // "Exclusive — Fall 2025 MT2 — Q4 — Linked Lists, Lists & Mutation" (names repeat across exams, so the exam is always shown)
   function groupLine(pid) {
-    const pr = PROBLEMS[pid];
+    const pr = PMAP[pid];
     return `${pr.title} — ${shortExam(pr.exam)} — Q${pr.number} — ${groupTopics(pid).map(topicLabel).join(', ')}`;
   }
 
@@ -2672,8 +2759,9 @@
   function pickCandidates() {
     const p = store.examPrefs;
     const q = ui.examQuery.trim().toLowerCase();
-    return Object.keys(PROBLEMS).filter((pid) => partsOf(pid).length &&
-      (!p.topics.length || groupTopics(pid).some((t) => p.topics.includes(t))) &&
+    // The Gleam chip matches every Gleam question (the exam-prep worksheets); other chips match Python topics.
+    return EXAM_PIDS.filter((pid) => partsOf(pid).length &&
+      (!p.topics.length || groupTopics(pid).some((t) => p.topics.includes(t)) || (isGleam(pid) && p.topics.includes(GLEAM_CHIP))) &&
       (!q || groupLine(pid).toLowerCase().includes(q)));
   }
   function pickListHTML() {
@@ -2695,7 +2783,7 @@
     const n = p.picked.length;
     const parts = p.picked.reduce((t, pid) => t + partsOf(pid).length, 0);
     const items = p.picked.map((pid) => {
-      const pr = PROBLEMS[pid];
+      const pr = PMAP[pid];
       const where = `${shortExam(pr.exam)} Q${pr.number}`;
       return `<li><span>${esc(pr.title)} <small>${esc(where)}</small></span><button class="unpick" data-action="unpick" data-pid="${pid}" aria-label="Remove ${esc(pr.title)} (${esc(where)})">✕</button></li>`;
     }).join('');
@@ -2719,6 +2807,7 @@
       }).join('')}</div>`;
     } else {
       const avail = TOPICS.filter((t) => Object.keys(PROBLEMS).some((pid) => groupTopics(pid).includes(t.id)));
+      if (EXAM_PIDS.some(isGleam)) avail.push({ id: GLEAM_CHIP, name: 'Gleam' }); // after the Python topics
       config = `<div class="chips" role="group" aria-label="Filter by topic">${avail.map((t) =>
         `<button class="chip" id="xt-${t.id}" data-action="xtopic" data-id="${t.id}" aria-pressed="${p.topics.includes(t.id)}">${esc(t.name)}</button>`).join('')}        ${p.topics.length ? '<button class="link" data-action="xtopics-clear">Clear filters</button>' : ''}</div>
         <input type="search" id="exam-search" class="pick-search" placeholder="Search by name, exam, or question number" value="${esc(ui.examQuery)}" aria-label="Search questions" autocomplete="off">
@@ -2805,10 +2894,11 @@
   // A problem's `illustration` (an exam image that is not a diagram to fill in) is shown in that same spot.
   const FIGURE_SLOT = new Set(['fa24-2', 'sp24-2']);
   function renderLeft(g) {
-    const pr = PROBLEMS[g.pid];
-    const ex = EXAMS[pr.exam];
+    const pr = PMAP[g.pid];
+    const ex = SRC[pr.exam];
+    const pts = headerPoints(g.pid, g.ids); // lecture examples have no points
     const topicIds = [...new Set(g.ids.flatMap((id) => QMAP[id].topics))];
-    const topics = topicIds.map((t) => `<span class="tag">${esc(TOPICS.find((x) => x.id === t).name)}</span>`).join('');
+    const topics = topicIds.map((t) => `<span class="tag">${esc(topicById(t).name)}</span>`).join('');
     const tool = (k, label, extra) => `<button class="ann-btn" data-ann="${k}" title="${label}" aria-label="${label}" ${extra || ''}>${icon(k)}</button>`;
     const review = isReview(cur());
     const bar = `<div class="annot-bar" id="annot-bar" role="toolbar" aria-label="Annotation tools">
@@ -2824,8 +2914,8 @@
       </div>`;
     return `${bar}
       <article class="problem" id="problem-article" data-mode="${ui.annMode}" aria-label="Problem">
-        <div class="src"><span>Source: <a href="${esc(ex.url)}" target="_blank" rel="noopener">${esc(ex.label)}</a>, Q${esc(pr.number)}</span>${topics}${scopeNoteHTML(scopeNote('problems', g.pid))}</div>
-        <h2>${esc(pr.number)}. <span class="pts">(${headerPoints(g.pid, g.ids).toFixed(1)} points)</span>${esc(pr.title)}</h2>
+        <div class="src"><span>Source: <a href="${esc(ex.url)}" target="_blank" rel="noopener">${esc(ex.label)}</a>, ${esc(qRef(pr))}</span>${topics}${scopeNoteHTML(scopeNote('problems', g.pid))}</div>
+        <h2>${ex.kind === 'lecture' ? '' : `${esc(pr.number)}. `}${typeof pts === 'number' ? `<span class="pts">(${pts.toFixed(1)} points)</span>` : ''}${esc(pr.title)}</h2>
         <div class="annot-text" data-annot="intro"></div>
         ${FIGURE_SLOT.has(g.pid) ? '<div hidden></div>' : pr.illustration ? `<figure class="exam-figure"><img src="${esc(pr.illustration.src)}" width="${esc(pr.illustration.width)}" height="${esc(pr.illustration.height)}" alt="${esc(pr.illustration.alt)}" draggable="false"><figcaption>Illustration from the exam PDF</figcaption></figure>` : ''}
         <div class="editor">
@@ -2838,7 +2928,7 @@
           <div id="editor-host"></div>
           ${runSlotHTML(g.pid)}
         </div>
-        <p class="editor-hint">${review ? 'Your review answers (below) appear in the blanks: <span class="key-fill key-mc">selected choice</span> <span class="key-fill key-typed">typed answer</span>. Edit the code freely; your submitted version is kept. <kbd>Tab</kbd> indents, <kbd>⌘/</kbd> toggles a comment.</p>' : `<span id="fill-hint">${fillHintHTML(autoFillOn(cur()))}</span> Click a blank to jump to its part. You can also type notes or <code>#</code> comments anywhere in the code; nothing is run. <kbd>Tab</kbd> indents, <kbd>⌘/</kbd> toggles a comment.</p>`}
+        <p class="editor-hint">${review ? 'Your review answers (below) appear in the blanks: <span class="key-fill key-mc">selected choice</span> <span class="key-fill key-typed">typed answer</span>. Edit the code freely; your submitted version is kept. <kbd>Tab</kbd> indents, <kbd>⌘/</kbd> toggles a comment.</p>' : `<span id="fill-hint">${fillHintHTML(autoFillOn(cur()))}</span> Click a blank to jump to its part. You can also type notes or <code>${isGleam(g.pid) ? '//' : '#'}</code> comments anywhere in the code; nothing is run. <kbd>Tab</kbd> indents, <kbd>⌘/</kbd> toggles a comment.</p>`}
         <div class="annot-text" data-annot="outro"></div>
         <svg class="annot-layer" aria-hidden="true"></svg>
       </article>
@@ -2849,8 +2939,14 @@
   // Learning feedback only: running never changes answers, grades, scores or attempts, and run output is kept
   // in memory (never saved). Available in Practice and in the editable Review; not during a live exam, which
   // shows no feedback until submission (and real exams have no interpreter).
+  // Gleam questions run with gleam_runner.js instead (same API and result shape), with their own tests from
+  // data/gleam_questions.js.
   const RUNNER = window.CS61A_RUNNER || null;
-  const runnerAllowed = (s) => !!RUNNER && !!s && (!isExam(s) || isReview(s));
+  const GLEAM_RUNNER = window.CS61A_GLEAM_RUNNER || null;
+  const runnerFor = (pid) => (isGleam(pid) ? GLEAM_RUNNER : RUNNER);
+  const langOf = (pid) => (isGleam(pid) ? 'Gleam' : 'Python');
+  const runnerAllowed = (s, pid) => !!runnerFor(pid) && !!s && (!isExam(s) || isReview(s));
+  const runLimitMs = (pid) => (isGleam(pid) && GL.RUN_LIMITS[pid]) || runnerFor(pid).config.RUN_TIMEOUT_MS;
   const runs = new Map();         // `${session key}:${pid}` -> { id, phase } while running, then the result
   const sessionKeys = new WeakMap(); // session object -> small id (practice sets have no id of their own)
   let runSeq = 0;
@@ -2873,7 +2969,13 @@
   }
   // The verified suite for a problem, or null. Only an explicit, verified suite with a verification record and
   // well-formed doctest cases counts; anything else means Console Output only, never a made-up test summary.
+  // Gleam problems: their test cases in data/gleam_questions.js, checked by tests/verify_gleam_bank.js; each input
+  // is Gleam code (usually one assert).
   function suiteFor(pid) {
+    if (isGleam(pid)) {
+      const t = GL.TESTS[pid];
+      return isObj(t) && Array.isArray(t.cases) && t.cases.length && t.cases.every((c) => isObj(c) && typeof c.input === 'string') ? t : null;
+    }
     const reg = window.CS61A_TEST_SUITES;
     const list = isObj(reg) && Array.isArray(reg.suites) ? reg.suites : [];
     return list.find((t) => isObj(t) && t.problem === pid && t.verified === true && isObj(t.verification)
@@ -2883,13 +2985,15 @@
   }
   const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
   function runSlotHTML(pid) {
-    if (!runnerAllowed(cur())) return `<div class="run-slot" id="run-slot-${pid}" data-run-slot="${pid}" hidden></div>`;
+    if (!runnerAllowed(cur(), pid)) return `<div class="run-slot" id="run-slot-${pid}" data-run-slot="${pid}" hidden></div>`;
     const suite = suiteFor(pid);
-    return `<div class="run-slot" id="run-slot-${pid}" data-run-slot="${pid}">
+    // Python Tutor steps through Python only, so Gleam questions don't offer it.
+    const tutor = isGleam(pid) ? '' : `<button class="btn btn-sm" id="tutor-btn" data-action="open-tutor" title="Step through this code in Python Tutor. Opens pythontutor.com in a new tab with the code from the editor.">Python Tutor ↗</button>
+        <span class="tutor-msg" id="tutor-msg" role="status" aria-live="polite" hidden></span>`;
+    return `<div class="run-slot" id="run-slot-${pid}" data-run-slot="${pid}" data-lang="${langOf(pid).toLowerCase()}">
       <div class="run-bar">
-        <button class="btn btn-sm btn-run" id="run-btn" data-action="run-code" title="${suite ? 'Run this code and its verified tests' : 'Run this code with Python in your browser'}">▶ Run Code</button>
-        <button class="btn btn-sm" id="tutor-btn" data-action="open-tutor" title="Step through this code in Python Tutor. Opens pythontutor.com in a new tab with the code from the editor.">Python Tutor ↗</button>
-        <span class="tutor-msg" id="tutor-msg" role="status" aria-live="polite" hidden></span>
+        <button class="btn btn-sm btn-run" id="run-btn" data-action="run-code" title="${suite ? 'Run this code and its verified tests' : `Run this code with ${langOf(pid)} in your browser`}">▶ Run Code</button>
+        ${tutor}
         ${suite ? `<span class="run-suite" id="run-suite">Includes ${plural(suite.cases.length, 'verified test')}</span>` : ''}
         <span class="run-status" id="run-status" role="status" aria-live="polite"></span>
       </div>
@@ -2910,17 +3014,21 @@
     window.open(`https://pythontutor.com/cp/composingprograms.html#code=${encodeURIComponent(code)}&cumulative=true&curInstr=0&mode=edit&py=3`, '_blank', 'noopener');
   }
   // Console Output for one run, then Test Results when the problem has a verified suite.
+  // r.lang and r.limitMs are recorded by runCode (which language ran, and its time limit).
   function runOutputHTML(r) {
-    return consoleHTML(r) + (r.tests ? testsHTML(r.tests) : '');
+    return consoleHTML(r) + (r.tests ? testsHTML(r.tests, r) : '');
   }
   function consoleHTML(r) {
+    const lang = r.lang || 'Python';
     if (r.status === 'timeout') {
-      return `<p class="run-msg">Stopped after ${Math.round(RUNNER.config.RUN_TIMEOUT_MS / 1000)} seconds: the code may have an infinite loop or very slow recursion. Python was restarted, so you can run again.</p>`;
+      return `<p class="run-msg">Stopped after ${Math.round(r.limitMs / 1000)} seconds: the code may have an infinite loop or very slow recursion. ${lang} was restarted, so you can run again.</p>`;
     }
     if (r.status === 'load-error') {
-      return `<p class="run-msg">Couldn’t load Python in your browser. Check your internet connection (the runtime is downloaded the first time) and press Run Code to try again.</p>`;
+      return lang === 'Gleam'
+        ? '<p class="run-msg">Couldn’t load the Gleam compiler in your browser. Reload the page and press Run Code to try again.</p>'
+        : '<p class="run-msg">Couldn’t load Python in your browser. Check your internet connection (the runtime is downloaded the first time) and press Run Code to try again.</p>';
     }
-    if (r.status === 'crash') return `<p class="run-msg">Python stopped unexpectedly (for example, recursion too deep for the browser). It has been restarted; you can run again.</p>`;
+    if (r.status === 'crash') return `<p class="run-msg">${lang} stopped unexpectedly (for example, recursion too deep for the browser). It has been restarted; you can run again.</p>`;
     const out = r.stdout ? `<pre class="run-out" tabindex="0" aria-label="Program output">${esc(r.stdout)}</pre>` : '<p class="run-empty">No output</p>';
     const trunc = r.truncated ? `<p class="run-msg">Output was cut off after ${RUNNER.config.OUTPUT_LIMIT.toLocaleString()} characters.</p>` : '';
     const err = r.error ? `<pre class="run-err" tabindex="0" aria-label="Error">${esc(r.error)}</pre>` : '';
@@ -2932,26 +3040,32 @@
     passed: ['✓', 'Passed'], failed: ['✗', 'Failed'], error: ['✗', 'Error'],
     timeout: ['✗', 'Timed out'], 'not-run': ['–', 'Not run'],
   };
-  const NOT_RUN_WHY = {
-    error: 'Tests did not run because your code raised an error (see Console Output above). Fix it and run again.',
+  const NOT_RUN_WHY = (lang, gleam) => ({
+    error: gleam ? 'Tests did not run because your code doesn’t compile (see Console Output above). Fix it and run again.'
+      : 'Tests did not run because your code raised an error (see Console Output above). Fix it and run again.',
     timeout: 'Tests did not run because your code timed out.',
-    crash: 'Tests did not run because Python stopped unexpectedly.',
-    'load-error': 'Tests did not run because Python could not be loaded.',
-    stopped: 'Python was restarted after a case timed out, so the remaining cases did not run.',
-  };
-  function testsHTML(t) {
+    crash: `Tests did not run because ${lang} stopped unexpectedly.`,
+    'load-error': `Tests did not run because ${lang} could not be loaded.`,
+    stopped: `${lang} was restarted after a case timed out, so the remaining cases did not run.`,
+  });
+  // Where a case comes from: Python suites say exam / added; Gleam ones given (printed with the question) / added.
+  const CASE_ORIGIN = { exam: 'From the exam', given: 'From the question', added: 'Added' };
+  function testsHTML(t, r) {
+    const lang = (r && r.lang) || 'Python';
+    const limitMs = (r && r.limitMs) || RUNNER.config.RUN_TIMEOUT_MS;
     const ran = t.total - t.notRun;
     const all = t.passed === t.total;
     const summary = ran === 0 ? 'Tests not run'
       : `Passed ${t.passed}/${plural(t.total, 'test')}${all ? '!' : ''}${t.notRun ? ` · ${t.notRun} not run` : ''}`;
-    const why = t.reason && NOT_RUN_WHY[t.reason] ? `<p class="run-msg">${NOT_RUN_WHY[t.reason]}</p>` : '';
+    const whyText = t.reason && NOT_RUN_WHY(lang, lang === 'Gleam')[t.reason];
+    const why = whyText ? `<p class="run-msg">${whyText}</p>` : '';
     const block = (label, text, cls) => `<div class="case-k">${label}</div><pre class="case-v${cls ? ` ${cls}` : ''}">${esc(text)}</pre>`;
     const trim = (x) => String(x || '').replace(/\n$/, '');
     const cases = t.cases.map((c, i) => {
       const [mark, word] = CASE_STATE[c.status] || CASE_STATE['not-run'];
       let body;
       if (c.status === 'not-run') body = block('Input', c.input);
-      else if (c.status === 'timeout') body = `${block('Input', c.input)}<p class="run-msg">Stopped after ${Math.round(RUNNER.config.RUN_TIMEOUT_MS / 1000)} seconds: this case may cause an infinite loop.</p>`;
+      else if (c.status === 'timeout') body = `${block('Input', c.input)}<p class="run-msg">Stopped after ${Math.round(limitMs / 1000)} seconds: this case may cause an infinite loop.</p>`;
       else if (!c.examples.length) body = `${block('Input', c.input)}${c.error ? block('Error', c.error, 'run-err') : ''}`;
       else {
         body = c.examples.map((x) => `<div class="case-ex${x.ok ? '' : ' case-ex-bad'}">
@@ -2963,7 +3077,7 @@
         </div>`).join('');
       }
       return `<details class="case st-case-${c.status}" data-case="${i}">
-        <summary><span class="case-mark" aria-hidden="true">${mark}</span> ${esc(c.name)}${c.origin ? ` <span class="case-origin">${c.origin === 'exam' ? 'From the exam' : 'Added'}</span>` : ''} <span class="case-state">${word}</span></summary>
+        <summary><span class="case-mark" aria-hidden="true">${mark}</span> ${esc(c.name)}${c.origin && CASE_ORIGIN[c.origin] ? ` <span class="case-origin">${CASE_ORIGIN[c.origin]}</span>` : ''} <span class="case-state">${word}</span></summary>
         <div class="case-body">${body}</div>
       </details>`;
     }).join('');
@@ -2986,6 +3100,13 @@
     'load-error': 'Couldn’t load Python',
     crash: 'Python restarted',
   };
+  const GLEAM_STATUS = Object.assign({}, RUN_STATUS, {
+    loading: 'Loading the Gleam compiler… (the first run takes a few seconds)',
+    running: 'Compiling and running…',
+    'load-error': 'Couldn’t load Gleam',
+    crash: 'Gleam restarted',
+  });
+  const runStatus = (pid) => (isGleam(pid) ? GLEAM_STATUS : RUN_STATUS);
   // Refresh the run bar + console for the problem on screen, from the result stored for *this* session and problem.
   function renderRunPanel() {
     const slot = leftPid && document.getElementById(`run-slot-${leftPid}`);
@@ -2997,9 +3118,10 @@
     const mine = r && r.phase; // this workspace's run is in progress
     btn.disabled = runBusy;
     btn.setAttribute('aria-busy', String(!!mine));
-    btn.title = runBusy && !mine ? 'Another run is still in progress' : 'Run this code with Python in your browser';
+    btn.title = runBusy && !mine ? 'Another run is still in progress' : `Run this code with ${langOf(leftPid)} in your browser`;
     const progress = mine && r.phase === 'testing' && r.progress ? ` (${r.progress.done + 1}/${r.progress.total})` : '';
-    const text = !r ? '' : mine ? RUN_STATUS[r.phase] + progress : `${RUN_STATUS[r.status]}${r.status === 'ok' || r.status === 'error' ? ` · ${r.ms} ms` : ''}`;
+    const st = runStatus(leftPid);
+    const text = !r ? '' : mine ? st[r.phase] + progress : `${st[r.status]}${r.status === 'ok' || r.status === 'error' ? ` · ${r.ms} ms` : ''}`;
     status.textContent = text;
     status.className = `run-status${r && !mine ? ` st-${r.status}` : ''}`;
     box.hidden = !r || !!mine;
@@ -3008,29 +3130,33 @@
   async function runCode() {
     const s = cur();
     const pid = leftPid;
-    if (!runnerAllowed(s) || !pid || runBusy) return;
+    if (!pid || !runnerAllowed(s, pid) || runBusy) return;
+    const runner = runnerFor(pid);
     const key = runKey(s, pid);
     const code = runnableCode(pid); // read now: later edits belong to the next run
     const suite = suiteFor(pid);
     const tests = suite && {
       setup: suite.setup || '',
-      cases: suite.cases.map((c) => ({ name: typeof c.name === 'string' ? c.name : '', origin: c.origin === 'exam' || c.origin === 'added' ? c.origin : null, input: c.input })),
+      cases: suite.cases.map((c) => ({ name: typeof c.name === 'string' ? c.name : '', origin: CASE_ORIGIN[c.origin] ? c.origin : null, input: c.input })),
     };
+    const limitMs = runLimitMs(pid);
     const id = ++runSeq;
     runBusy = true;
-    runs.set(key, { id, phase: RUNNER.ready ? 'running' : 'loading' });
+    runs.set(key, { id, phase: runner.ready ? 'running' : 'loading' });
     renderRunPanel();
-    const result = await RUNNER.run(code, {
+    const result = await runner.run(code, {
       tests,
+      files: isGleam(pid) ? GL.FILES[pid] : undefined, // a Gleam problem's own JavaScript (@external) files
+      timeoutMs: isGleam(pid) ? limitMs : undefined,
       onPhase: (phase, progress) => { const r = runs.get(key); if (r && r.id === id && r.phase) { r.phase = phase; r.progress = progress; renderRunPanel(); } },
     });
     runBusy = false;
     if (result.tests && suite && typeof suite.setupNote === 'string') result.tests.setupNote = suite.setupNote;
-    if (runs.get(key) && runs.get(key).id === id) runs.set(key, Object.assign({ id }, result));
+    if (runs.get(key) && runs.get(key).id === id) runs.set(key, Object.assign({ id, lang: langOf(pid), limitMs }, result));
     renderRunPanel(); // shows the result only if this question is still on screen; otherwise it waits for it
     const t = result.tests;
     const testsSaid = !t ? '' : t.total - t.notRun ? ` Passed ${t.passed} of ${plural(t.total, 'test')}.` : ' Tests not run.';
-    if (runKey(cur(), leftPid) === key) announce(`Run finished: ${RUN_STATUS[result.status]}.${testsSaid}`);
+    if (runKey(cur(), leftPid) === key) announce(`Run finished: ${runStatus(pid)[result.status]}.${testsSaid}`);
   }
   // Build the left pane for a group. Runs only when the group changes, so annotations, the editor,
   // the text selection and the scroll position are never wiped by ordinary re-renders.
@@ -3179,8 +3305,8 @@
       staff: '<div class="verdict">Graded by Course Staff</div><p class="staff-note">This question requires manual grading and will not be graded on this platform.</p>',
     }[st];
     return `<div class="rv-part" id="rv-${q.id}">
-      <p class="q-head"><span class="lbl">${esc(q.label)}</span>${inline(q.prompt)}
-        <span class="part-meta">${pts} · <span class="badge ${badgeCls(st)}">${STATUS_LABEL[st]}</span></span></p>
+      <p class="q-head"><span class="lbl">${esc(q.label)}</span>${promptParts(q.prompt).head}
+        <span class="part-meta">${pts} · <span class="badge ${badgeCls(st)}">${STATUS_LABEL[st]}</span></span></p>${promptParts(q.prompt).below}
       <div class="rv-block"><div class="rv-k">Your submitted answer</div>${sub}</div>
       ${current}
       <div class="feedback ${{ correct: 'good', incorrect: 'bad', skipped: 'info', staff: 'info' }[st]}">${verdict}${officialAnswerHTML(q)}</div>
@@ -3224,8 +3350,8 @@
         : '<button class="btn" data-action="reveal">Show Solution</button>'}
     </div>`;
     return `<div class="part${ui.activeBlank && ui.activeBlank === q.blank ? ' active' : ''}" id="part-${id}" data-part="${id}" data-blank="${esc(q.blank || '')}">
-      <p class="q-head"><span class="lbl">${esc(q.label)}</span>${pts}${inline(q.prompt)}
-        <span class="part-meta">${exam && q.type === 'code' ? 'Code response' : TYPE_LABEL[q.type]} · <span class="diff-${q.difficulty}">${q.difficulty}</span></span></p>
+      <p class="q-head"><span class="lbl">${esc(q.label)}</span>${pts}${promptParts(q.prompt).head}
+        <span class="part-meta">${exam && q.type === 'code' ? 'Code response' : TYPE_LABEL[q.type]} · <span class="diff-${q.difficulty}">${q.difficulty}</span></span></p>${promptParts(q.prompt).below}
       ${scopeNoteHTML(scopeNote('questions', id))}
       ${response}
       ${actions}
@@ -3364,7 +3490,7 @@
   }
 
   // ── Walkthrough videos (data/walkthroughs.js): one YouTube playlist per past exam, found from a question's own
-  // exam (PROBLEMS[pid].exam), never from its position. Only on Practice Summary and Exam Results, never mid-exam.
+  // exam (PMAP[pid].exam), never from its position. Only on Practice Summary and Exam Results, never mid-exam.
   function playlistFor(examId) {
     const w = window.CS61A_WALKTHROUGHS;
     return w && typeof w.getWalkthroughPlaylist === 'function' ? w.getWalkthroughPlaylist(examId) : null;
@@ -3379,7 +3505,7 @@
   // number of distinct question groups (problems, not parts) from that exam in this set.
   function walkSectionHTML(s) {
     const groupsBy = {};
-    s.groups.forEach((g) => { const e = PROBLEMS[g.pid].exam; (groupsBy[e] = groupsBy[e] || new Set()).add(g.pid); });
+    s.groups.forEach((g) => { const e = PMAP[g.pid].exam; (groupsBy[e] = groupsBy[e] || new Set()).add(g.pid); });
     const rows = Object.keys(EXAMS).filter((e) => groupsBy[e] && playlistFor(e)).map((e) => {
       const n = groupsBy[e].size;
       return `<li class="walk-row" data-exam="${esc(e)}"><span class="walk-ex">${esc(EXAMS[e].label)}<small>${n} question group${n === 1 ? '' : 's'} in this practice set</small></span>${walkLinkHTML(e)}</li>`;
@@ -3400,13 +3526,13 @@
     const counts = { correct: 0, incorrect: 0, ungraded: 0, skipped: 0 };
     const rows = s.groups.map((g, gi) => g.ids.map((id) => {
       const q = QMAP[id];
-      const pr = PROBLEMS[q.problem];
+      const pr = PMAP[q.problem];
       const st = statusOf(s, id);
       counts[st]++;
       const label = { correct: 'Correct', incorrect: 'Incorrect', ungraded: 'Not graded', skipped: 'Unanswered' }[st];
       return `<button class="result-row" data-action="review" data-i="${gi}" data-q="${id}">
         <span class="n">${gi + 1}${g.ids.length > 1 ? `<small>${esc(q.label)}</small>` : ''}</span>
-        <span class="t">${esc(EXAMS[pr.exam].label)} Q${esc(pr.number)} ${esc(q.label)}: ${esc(pr.title)}<small>${TYPE_LABEL[q.type]}${s.marked[g.pid] ? ' · marked for review' : ''}${s.revealed[id] ? ' · solution viewed' : ''}</small></span>
+        <span class="t">${esc(SRC[pr.exam].label)} ${esc(qRef(pr))} ${esc(q.label)}: ${esc(pr.title)}<small>${TYPE_LABEL[q.type]}${s.marked[g.pid] ? ' · marked for review' : ''}${s.revealed[id] ? ' · solution viewed' : ''}</small></span>
         <span class="badge ${st}">${label}</span></button>`;
     }).join('')).join('');
     const answered = s.ids.length - counts.skipped;
@@ -3453,7 +3579,7 @@
         if (!own) tally[t].broad = true;
       });
     });
-    const order = Object.fromEntries(TOPICS.map((t, i) => [t.id, i]));
+    const order = Object.fromEntries(ALL_TOPICS.map((t, i) => [t.id, i]));
     const topics = Object.values(tally).sort((x, y) => y.parts.length - x.parts.length || order[x.id] - order[y.id]);
     const unanswered = a.ids.filter((id) => statusIn(a, id) === 'skipped').length;
     return { missed, topics, unanswered, staff: a.ids.filter((id) => statusIn(a, id) === 'staff').length };
@@ -3462,7 +3588,7 @@
   // deterministic: more parts tagged with the topic first, then question-bank order. A group is never repeated.
   function recommend(topic, a, used, n) {
     const inAttempt = new Set(a.groups.map((g) => g.pid));
-    const rank = Object.keys(PROBLEMS)
+    const rank = EXAM_PIDS
       .map((pid, i) => ({ pid, i, hits: partsOf(pid).filter((q) => q.topics.includes(topic)).length }))
       .filter((r) => r.hits && !used.has(r.pid))
       .sort((x, y) => x.hits === y.hits ? x.i - y.i : y.hits - x.hits);
@@ -3506,8 +3632,8 @@
     const recs = ins.topics.map((t) => {
       const list = recommend(t.id, a, used, 3);
       const rows = list.map((r) => {
-        const pr = PROBLEMS[r.pid];
-        return `<li class="rec-row"><span class="rec-txt"><b>${esc(pr.title)}</b> <span class="hint">${esc(EXAMS[pr.exam].label)} · Q${esc(pr.number)} · ${partsOf(r.pid).length} part${partsOf(r.pid).length === 1 ? '' : 's'}${r.fromAttempt ? ' · also in this exam' : ''}</span></span>
+        const pr = PMAP[r.pid];
+        return `<li class="rec-row"><span class="rec-txt"><b>${esc(pr.title)}</b> <span class="hint">${esc(SRC[pr.exam].label)} · Q${esc(pr.number)} · ${partsOf(r.pid).length} part${partsOf(r.pid).length === 1 ? '' : 's'}${r.fromAttempt ? ' · also in this exam' : ''}</span></span>
           <button class="btn btn-sm" data-action="practice-group" data-pid="${r.pid}" aria-label="Practice ${esc(pr.title)} (${esc(shortExam(pr.exam))} Q${esc(pr.number)}) in Practice Mode">Practice</button></li>`;
       }).join('');
       return `<div class="rec-topic"><h5>${topicName(t)}</h5>${rows ? `<ul class="rec-list">${rows}</ul>` : '<p class="hint">No other questions in the bank cover this topic yet.</p>'}</div>`;
@@ -3544,13 +3670,13 @@
     }).join('');
     const full = a.kind === 'full'; // a full past exam gets one Walkthrough link, beside the Questions heading
     const groups = a.groups.map((g, gi) => {
-      const pr = PROBLEMS[g.pid];
+      const pr = PMAP[g.pid];
       const c = { correct: 0, incorrect: 0, skipped: 0, staff: 0 };
       g.ids.forEach((id) => { c[statusIn(a, id)]++; });
       const summary = ['correct', 'incorrect', 'skipped', 'staff'].filter((k) => c[k]).map((k) => `${c[k]} ${STATUS_LABEL[k].toLowerCase()}`).join(' · ');
       const walk = full ? '' : walkLinkHTML(pr.exam); // topic-based: each group links its own exam's playlist
       return `<details class="rq-group${walk ? ' has-walk' : ''}"${c.incorrect ? ' open' : ''}>
-        <summary><span class="rq-n">${gi + 1}</span><span class="rq-title">${esc(pr.title)}<small>${esc(EXAMS[pr.exam].label)} · Q${esc(pr.number)} · ${g.ids.length} part${g.ids.length === 1 ? '' : 's'}</small></span><span class="rq-sum">${summary}</span>${walk ? `<span class="rq-walk">${walk}</span>` : ''}</summary>
+        <summary><span class="rq-n">${gi + 1}</span><span class="rq-title">${esc(pr.title)}<small>${esc(SRC[pr.exam].label)} · Q${esc(pr.number)} · ${g.ids.length} part${g.ids.length === 1 ? '' : 's'}</small></span><span class="rq-sum">${summary}</span>${walk ? `<span class="rq-walk">${walk}</span>` : ''}</summary>
         <ul class="part-rows">${rowsFor(g, gi)}</ul></details>`;
     }).join('');
     const excluded = [sc.staff ? `${sc.staff} part${sc.staff === 1 ? '' : 's'} graded by course staff` : '', sc.unknown ? `${sc.unknown} part${sc.unknown === 1 ? '' : 's'} without a published point value` : ''].filter(Boolean);
@@ -3712,8 +3838,9 @@
       case 'replay-tour': if (TOUR) TOUR.replay(); return;
       case 'landing': ui.screen = 'landing'; ui.menu = null; break;
       case 'menu': ui.menu = ui.menu === btn.dataset.id ? null : btn.dataset.id; break;
-      case 'topics-all': p.topics = TOPICS.filter((t) => QUESTIONS.some((x) => x.topics.includes(t.id))).map((t) => t.id); break;
-      case 'topics-none': p.topics = []; break;
+      case 'topics-all': langView(p).sections.forEach((sec) => { p[sec.topicsPref] = sec.topicList.filter((t) => sec.questions.some((x) => x.topics.includes(t.id))).map((t) => t.id); }); break;
+      case 'topics-none': langView(p).sections.forEach((sec) => { p[sec.topicsPref] = []; }); break;
+      case 'lang': p.lang = btn.dataset.v; ui.sizeDraft = null; break;
       case 'size-step': {
         const typed = ui.sizeDraft != null ? parseSize(ui.sizeDraft) : null;
         const max = sizeMax();
@@ -3798,9 +3925,9 @@
       }
       case 'practice-group': { // recommendation: a new practice set with just this question group (all its parts)
         const pid = btn.dataset.pid;
-        if (!PROBLEMS[pid]) return;
+        if (!PMAP[pid]) return;
         if (store.session && !store.session.finished && !confirm('Practicing this question replaces your unfinished practice set. Continue?')) return;
-        const pr = PROBLEMS[pid];
+        const pr = PMAP[pid];
         p.mode = 'practice';
         newSession(partsOf(pid).map((q) => q.id), `Practice: ${pr.title} (${shortExam(pr.exam)} Q${pr.number})`);
         return;
