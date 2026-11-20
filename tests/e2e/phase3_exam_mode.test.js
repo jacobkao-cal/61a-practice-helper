@@ -202,8 +202,9 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   S = await st();
   ok(S.attempts.length === 2 && JSON.stringify(S.attempts[0].answers) === JSON.stringify(A1.answers), 'retake submitted: 2 attempts, first unchanged');
   await click('[data-action="home"], [data-action="go-home"]');
-  ok(await count('.history .hist-row') === 2, 'exam history lists both attempts');
-  await click('.history .hist-row:last-child');
+  await click('[data-action="progress"]');
+  ok(await count('.mh-card [data-action="open-attempt"]') === 2, 'My History lists both attempts');
+  await page.$$eval('.mh-card [data-action="open-attempt"]', (b) => b[b.length - 1].click()); await wait(150);
   ok(await has('.exam-results') && (await text('.score-main')).includes(`${earned} / ${possible}`), '12. reopening an old attempt shows its results');
   await click('[data-action="home"], [data-action="go-home"]');
 

@@ -297,7 +297,7 @@ function installFake() {
   ok(sess.length === 1 && sess[0].id === offAid && sess[0].status === 'completed' && rows['sp25-4e'].result === 'correct' && rows['sp25-4e'].first_check === 'correct' && Object.keys(rows).length === 5,
     'back online: finalize creates the session, all 5 final rows and the completed status in one go');
 
-  // ── A new set over an unfinished one: the old one is discarded ──
+  // ── A new set over an unfinished one: the old one moves to My History and stays in progress ──
   await clean(page); await seed(page, practiceSet()); await page.goto(URL_);
   await click(page, '.landing-resume[data-action="resume"]'); await settle(page);
   const oldAid = (await store(page)).session.aid;
@@ -305,8 +305,27 @@ function installFake() {
   await click(page, '[data-action="start"]'); await page.waitForSelector('#pane-right .part');
   await settle(page);
   const newAidv = (await store(page)).session.aid;
-  const byId = Object.fromEntries((await db(page, 'practice_sessions')).map((r) => [r.id, r]));
-  ok(newAidv && newAidv !== oldAid && byId[oldAid].status === 'discarded' && byId[newAidv].status === 'in_progress', 'starting a new set over an unfinished one: old one discarded, new one in progress');
+  let byId = Object.fromEntries((await db(page, 'practice_sessions')).map((r) => [r.id, r]));
+  ok(newAidv && newAidv !== oldAid && byId[oldAid].status === 'in_progress' && byId[newAidv].status === 'in_progress' && !(await aState(page)).closed[oldAid],
+    'starting a new set over an unfinished one: the old one is shelved in My History and stays in progress (not discarded)');
+  // continue the old set from My History, answer, finish: one finalize as completed
+  await click(page, '[data-action="home"]'); await click(page, '[data-action="progress"]');
+  await click(page, `.mh-card [data-action="open-set"][data-id="${(await store(page)).practice[0].id}"]`); await page.waitForSelector('#pane-right .part');
+  ok((await store(page)).session.aid === oldAid, 'continuing it from My History keeps its tracking id');
+  await type(page, 'sp25-4d', (await page.evaluate(() => window.CS61A_BANK.ANSWER_KEY['sp25-4d'].accepted[0])));
+  await finish(page); await settle(page);
+  byId = Object.fromEntries((await db(page, 'practice_sessions')).map((r) => [r.id, r]));
+  let fins = (await calls(page)).filter((c) => c.table === 'rpc:finalize_session' && c.args.p_session.id === oldAid);
+  rows = Object.fromEntries((await db(page, 'question_attempts')).filter((r) => r.session_id === oldAid).map((r) => [r.question_id, r]));
+  ok(byId[oldAid].status === 'completed' && fins.length === 1 && rows['sp25-4d'] && rows['sp25-4d'].result === 'correct' && byId[newAidv].status === 'in_progress',
+    'finished after being shelved: recorded once as completed with its answers; the other set is still in progress');
+  // deleting the unfinished one from My History: discarded
+  await click(page, '[data-action="go-home"]'); await click(page, '[data-action="progress"]');
+  await click(page, `.mh-card [data-action="delete-set"][data-id="${(await store(page)).practice.find((x) => !x.finished).id}"]`);
+  await settle(page);
+  byId = Object.fromEntries((await db(page, 'practice_sessions')).map((r) => [r.id, r]));
+  ok(byId[newAidv].status === 'discarded' && byId[oldAid].status === 'completed', 'deleting an unfinished set from My History: discarded; the finished one is untouched');
+  ok((await calls(page)).filter((c) => c.table === 'rpc:finalize_session' && c.args.p_session.id === oldAid).length === 1, 'a finished set is never sent again');
 
   // ── Gleam and mixed sets ──
   await clean(page); await seed(page, practiceSet(['gl-ep11-3a', 'gl-ep11-3b', 'gl-ep11-3c'])); await page.goto(URL_);
@@ -351,7 +370,7 @@ function installFake() {
   await type(page, 'sp25-4d', 'something else').catch(() => {});
   for (let i = 0; i < 2; i++) { await page.$eval('[data-action="run-code"]', (b) => b.click()).catch(() => {}); await wait(400); }
   await click(page, '[data-action="go-home"]').catch(() => {});
-  await page.evaluate(() => { const r = document.querySelector('.hist-row'); if (r) r.click(); }); await page.waitForSelector('.exam-results .btn-walk');
+  await click(page, '[data-action="progress"]'); await click(page, '.mh-card [data-action="open-attempt"]'); await page.waitForSelector('.exam-results .btn-walk');
   for (let i = 0; i < 2; i++) await page.$eval('.exam-results .btn-walk', (a) => { a.addEventListener('click', (e) => e.preventDefault(), { once: true }); a.click(); });
   await click(page, '.actions [data-action="exam-review"]'); await wait(300);
   await settle(page);

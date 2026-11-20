@@ -52,7 +52,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   for (const [name, raw] of Object.entries(bad)) {
     const before = errors.length;
     await seed(raw);
-    for (const sel of ['[data-action="enter"]', '.resume [data-action="resume"]', '[data-action="resume-exam"]', '#mode-exam', '[data-action="open-attempt"]', '.actions [data-action="exam-review"]', '[data-action="exam-results"]', '#mode-practice']) {
+    for (const sel of ['[data-action="enter"]', '.resume [data-action="resume"]', '[data-action="resume-exam"]', '#mode-exam', '[data-action="progress"]', '[data-action="open-attempt"]', '.actions [data-action="exam-review"]', '[data-action="exam-results"]', '#mode-practice']) {
       const el = await page.$(sel);
       if (el && await el.isIntersectingViewport().catch(() => false)) { try { await el.click(); await wait(80); } catch (e) { /* element went away */ } }
     }
@@ -61,7 +61,8 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   // valid data still loads after repair: a good attempt next to a bad one is kept
   await seed({ attempts: [{ mode: 'exam' }, { id: 'ok1', mode: 'exam', submitted: true, kind: 'custom', title: 'Good', ids: ['fa25-1a'], answers: { 'fa25-1a': 3 }, finishedAt: 5, startedAt: 0 }] });
   await click('[data-action="enter"]'); await click('#mode-exam');
-  ok(await page.$$eval('.hist-row', (r) => r.length) === 1 && /Good/.test(await text('.history')), 'a valid attempt next to a damaged one is preserved');
+  await click('[data-action="progress"]');
+  ok(await page.$$eval('.mh-card', (r) => r.length) === 1 && /Good/.test(await text('.mh-list')), 'a valid attempt next to a damaged one is preserved');
 
   // ── §5 grading audit: every question, official answers → everything auto-gradable correct ──
   for (const exam of ['fa25', 'sp25']) {
@@ -90,8 +91,9 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     // consistency: Results headline / Exam History badge / Review badges
     const head = await text('.score-main .v');
     await click('[data-action="go-home"]');
-    const badge = await page.$eval(`.hist-row[data-id="${a.id}"] .badge`, (b) => b.textContent);
-    ok(head.replace(/\s+/g, '') === `${pts}/${pts}pts` && badge === `Auto-graded ${pts} / ${pts} pts`, `${exam}: Results "${head}" and History "${badge}" agree`);
+    await click('[data-action="progress"]');
+    const badge = await page.$eval(`.mh-card [data-action="open-attempt"][data-id="${a.id}"]`, (b) => b.closest('.mh-card').querySelector('.mh-meta').textContent);
+    ok(head.replace(/\s+/g, '') === `${pts}/${pts}pts` && badge.endsWith(`Auto-graded ${pts} / ${pts} pts`), `${exam}: Results "${head}" and My History "${badge}" agree`);
   }
   // wrong / partial / whitespace & quote-insensitive / unanswered
   const multi = B.QUESTIONS.find((q) => q.type === 'multi_select' && B.ANSWER_KEY[q.id].correct.length >= 1);
@@ -170,13 +172,16 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   await click('.p-footer [data-action="submit-exam"]'); await page.waitForSelector('.exam-results');
   await click('[data-action="go-home"]');
   ok(await has('.resume [data-action="resume"]') || await has('.resume [data-action="show-results"]'), 'practice set still offered after an exam');
-  const hist = await page.$$eval('.hist-row', (r) => r.map((x) => x.dataset.id));
-  await click(`.hist-row[data-id="${hist[0]}"]`);
+  await click('[data-action="progress"]');
+  const hist = await page.$$eval('.mh-card [data-action="open-attempt"]', (r) => r.map((x) => x.dataset.id));
+  await click(`.mh-card [data-action="open-attempt"][data-id="${hist[0]}"]`);
   await click('.actions [data-action="exam-review"]'); await page.waitForSelector('#review-work .part');
   ok(await has('.review-banner [data-action="go-home"]'), 'Interactive Review has a Go to Home button');
   await click('.review-banner [data-action="go-home"]');
-  ok(await has('.home .history') && await page.$$eval('.hist-row', (r) => r.length) === hist.length, 'Review → Go to Home: home with Exam History intact');
-  await click(`.hist-row[data-id="${hist[0]}"]`);
+  ok(await has('.home .mode-switch'), 'Review → Go to Home: back on the home page');
+  await click('[data-action="progress"]');
+  ok(await page.$$eval('.mh-card [data-action="open-attempt"]', (r) => r.length) === hist.length, 'My History still lists every attempt');
+  await click(`.mh-card [data-action="open-attempt"][data-id="${hist[0]}"]`);
   ok(await has('.exam-results'), 'completed attempt reopens from history');
 
   // ── §10 two tabs: a stale tab can no longer overwrite exam history ──
@@ -200,7 +205,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
   // ── §13 Phase 6A readiness ──
   await click('[data-action="go-home"]'); await click('#mode-exam');
-  await click('.hist-row'); await click('.actions [data-action="exam-review"]'); await page.waitForSelector('#review-work .part');
+  await click('[data-action="progress"]'); await click('.mh-card [data-action="open-attempt"]'); await click('.actions [data-action="exam-review"]'); await page.waitForSelector('#review-work .part');
   const ready = await page.evaluate(() => {
     const cm = document.querySelector('.CodeMirror').CodeMirror;
     cm.replaceRange('# probe\n', { line: 0, ch: 0 });

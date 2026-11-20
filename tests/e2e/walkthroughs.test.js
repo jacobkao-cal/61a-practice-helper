@@ -92,12 +92,12 @@ ok(mixed.length >= 4 && mixed.every((id) => byQ(id) === URLS[B.PROBLEMS[B.QUESTI
   ok((await clickOpens('.rq-head .btn-walk')) === URLS.fa25 && await has('.exam-results'), 'clicking opens the Fall 2025 playlist in a new tab; Exam Results stays open');
   const fullId = await page.evaluate((k) => JSON.parse(localStorage.getItem(k)).attempts.slice(-1)[0].id, KEY);
 
-  // Exam History reopens the same results page with its link
-  await click('[data-action="go-home"]'); await page.waitForSelector(`.hist-row[data-id="${fullId}"]`);
-  ok(!(await has('.btn-walk')), 'home / Exam History list: no Walkthrough links');
-  await click(`.hist-row[data-id="${fullId}"]`); await page.waitForSelector('.exam-results');
+  // My History reopens the same results page with its link
+  await click('[data-action="go-home"]'); await click('[data-action="progress"]'); await page.waitForSelector(`.mh-card [data-action="open-attempt"][data-id="${fullId}"]`);
+  ok(!(await has('.btn-walk')), 'My Progress / My History: no Walkthrough links');
+  await click(`.mh-card [data-action="open-attempt"][data-id="${fullId}"]`); await page.waitForSelector('.exam-results');
   L = await links('.exam-results .btn-walk');
-  ok(L.length === 1 && linkOk(L[0], URLS.fa25), 'reopened from Exam History: the same single Fall 2025 link');
+  ok(L.length === 1 && linkOk(L[0], URLS.fa25), 'reopened from My History: the same single Fall 2025 link');
   // review of the attempt: none
   await click('.actions [data-action="exam-review"]'); await page.waitForSelector('#pane-right');
   ok(!(await has('.btn-walk')), 'reviewing the attempt: no Walkthrough links in the question workspace');

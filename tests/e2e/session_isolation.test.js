@@ -38,7 +38,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.waitForSelector('#pane-right .part');
   let S = await st();
   const first = S.session.groups[0].pid;
-  const firstQ = B.QUESTIONS.find((q) => q.problem === first);
+  const firstQ = B.QUESTIONS.find((q) => q.id === S.session.groups[0].ids[0]); // the set's first part (an out-of-scope part is never shown)
 
   // ── annotate: highlight + pen + code edit + code highlight + an answer ──
   const highlight = async () => {

@@ -130,10 +130,13 @@ window.CS61A_ANALYTICS = (() => {
 
   // Sets and exams still going get their id as soon as they are seen (also ones saved before tracking existed), so
   // everything done in them (Run Code right after reopening, say) is filed under them.
+  // Unfinished practice sets in My History (moved there when another set started). They can be continued later, so
+  // they stay in progress; one counts as discarded only once it is deleted. Finished ones were finalized when finished.
+  const shelved = (S) => (Array.isArray(S.practice) ? S.practice : []).filter((s) => s && !s.finished);
   function ensureIds() {
     const S = app.getStore();
     let assigned = false;
-    [S.session && !S.session.finished ? S.session : null, S.exam].forEach((s) => { if (s && !s.aid) { s.aid = uuid(); assigned = true; } });
+    [S.session && !S.session.finished ? S.session : null, ...shelved(S), S.exam].forEach((s) => { if (s && !s.aid) { s.aid = uuid(); assigned = true; } });
     if (assigned) app.save();
   }
 
@@ -147,6 +150,7 @@ window.CS61A_ANALYTICS = (() => {
       const st = load();
       const live = [];
       if (S.session && S.session.aid && !st.closed[S.session.aid]) live.push([S.session.finished ? 'done-practice' : 'practice', S.session]);
+      shelved(S).forEach((s) => { if (s.aid && !st.closed[s.aid]) live.push(['practice', s]); });
       if (S.exam && S.exam.aid && !st.closed[S.exam.aid]) live.push(['exam', S.exam]);
       (S.attempts || []).forEach((a) => { if (a.aid && !st.closed[a.aid]) live.push(['attempt', a]); });
       const liveIds = new Set(live.map(([, s]) => s.aid));
@@ -178,7 +182,8 @@ window.CS61A_ANALYTICS = (() => {
         s.ids.filter((id) => m.checks[id] || (s.revealed && s.revealed[id]) || app.practiceResult(s, id) !== 'unanswered')
           .forEach((id) => { const r = partRow(k, s, m, id); if (r) enqueue(st, `a:${s.aid}:${id}`, 'question_attempts', r); });
       });
-      // Sessions that were in progress and are gone (discarded, or replaced by a new set / retake): final as discarded.
+      // Sessions that were in progress and are gone (a practice set deleted from My History, an exam discarded or
+      // replaced by a new exam / retake): final as discarded.
       Object.keys(st.open).forEach((aid) => {
         if (liveIds.has(aid)) return;
         enqueue(st, `s:${aid}`, 'practice_sessions', Object.assign({}, st.open[aid], { status: 'discarded' }));

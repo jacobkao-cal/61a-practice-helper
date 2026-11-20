@@ -198,7 +198,7 @@ function installFake() {
   await seed(page, history); await page.goto(URL_);
   const before = await page.evaluate((k) => localStorage.getItem(k), KEY);
   await click(page, '[data-action="enter"]'); S = await settled(page);
-  await page.waitForSelector('.hist-row[data-id="a1"]');
+  await click(page, '[data-action="progress"]'); await page.waitForSelector('.mh-card [data-action="open-attempt"][data-id="a1"]');
   const keys = await page.evaluate(() => Object.keys(localStorage).sort());
   ok(S.status === 'ready' && keys.filter((k) => !k.startsWith('fake-sb-')).join() === 'cs61a-practice:tour,cs61a-practice:v1', `only the app’s own keys besides the session (${keys.join(', ')})`);
   const after = JSON.parse(await page.evaluate((k) => localStorage.getItem(k), KEY));
