@@ -1,0 +1,41 @@
+<html>
+  <head>
+  </head>
+  <body>
+    <script>
+
+      function downloadJSON(data, filename = 'data.json') {
+        // 1. Convert the JavaScript object to a formatted JSON string
+        const jsonString = JSON.stringify(data, null, 2);
+      
+        // 2. Create a Blob with the JSON MIME type
+        const blob = new Blob([jsonString], { type: 'application/json' });
+      
+        // 3. Create a temporary URL and anchor element
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+      
+        // 4. Append, trigger the download, and clean up
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }
+
+      function exportData() {
+        const data = {}
+        const entries = Object.entries(localStorage);
+        for (const [key, value] of entries) data[key] = value;
+        downloadJSON(data, "my-progress.json");
+      }
+      
+    </script>
+    
+    <p>This site has moved, please check out our</p>
+    <a href="https://bearsrepo.github.io/CS61A-C88C-Exam-Practice/">New Link</a>
+
+    <button onclick="exportData">Export Old Data</button>
+  </body>
+</html>
